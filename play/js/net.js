@@ -875,7 +875,18 @@ export async function joinGameRoom(opts) {
   }
 
   // ---- send self 'hello' now that listeners are attached --------------------
+  // Broadcast once for anyone already connected...
   room.send('hello', { name, role: isHost ? 'player' : role });
+  // ...and re-introduce ourselves to every peer that connects AFTER us.
+  // Trystero sends only reach peers connected at send time, so the initial
+  // broadcast lands on nobody when we're first into the room — which
+  // deadlocked host+guest on "waiting for opponent" (verified live
+  // 2026-07-06). Repeat hellos are idempotent on the receiving side
+  // (peerInfo.set overwrite; main.js host unsubscribes after first player
+  // hello), so re-sending per peer-join is safe.
+  room.onPeerJoin((peerId) => {
+    room.send('hello', { name, role: isHost ? 'player' : role }, peerId);
+  });
 
   // ---- session object -------------------------------------------------------
 
