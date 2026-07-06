@@ -1,0 +1,18 @@
+/* ==========================================================================
+   board.css — SKELETON. Empty in Phase 1.
+
+   Phase 2/4 will put here:
+   - Layout for #screen-game: the 14-pit Mancala board (2 rows of 6 pits +
+     2 stores), sized/positioned mobile-first with a rotated/adapted layout
+     for narrow portrait screens.
+   - Pit and store shapes, stone piles/counts, current-player indicator,
+     legal-move affordances (tap targets ≥44px per base.css --touch-min).
+   - Animation keyframes/transitions consumed by js/ui.js's animateEvents()
+     (sow hop-by-hop stone movement, capture sweep, extra-turn highlight,
+     game-over overlay).
+   - Responsive breakpoints scaling the board up for tablet/desktop widths.
+
+   Visual values (colors, wood/stone textures) should be pulled from the
+   custom properties defined in css/themes.css, not hardcoded here, so
+   Phase 4's theme picker can reskin the board without touching this file.
+   ========================================================================== */

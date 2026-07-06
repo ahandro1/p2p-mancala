@@ -1,0 +1,42 @@
+/* ==========================================================================
+   themes.css — CSS custom-property contract for board/stone theming.
+
+   Phase 4 will expand this into multiple selectable themes (matching the
+   CONFIG.themes.board / CONFIG.themes.stones lists in js/config.js, e.g.
+   `:root[data-theme-board="walnut"]`, `[data-theme-stones="glass"]`, etc.),
+   switched at runtime by js/ui.js's setTheme(). Only one default theme is
+   defined for now so Phase 4 has a working pattern to extend rather than
+   invent from scratch.
+
+   Consumers (board.css, and inline styles in js/ui.js) should read these
+   variables rather than hardcoding colors, so a theme swap never requires
+   touching layout code.
+   ========================================================================== */
+
+:root {
+  /* Board surface */
+  --board-bg: #6b4a2f;
+  --board-border: #4a3220;
+
+  /* Pit (the 12 player pits) */
+  --pit-bg: #3d2a1a;
+  --pit-border: #241708;
+
+  /* Store (the 2 Kalah end pits) */
+  --store-bg: #33220f;
+  --store-border: #1c1206;
+
+  /* Stones */
+  --stone-fill: #eae6da;
+  --stone-shadow: #00000055;
+  --stone-highlight: #ffffffaa;
+
+  /* Player accents (current-turn indicator, owned-pit highlight, etc.) */
+  --player-1-accent: #5da9ff;
+  --player-2-accent: #ff9d5d;
+
+  /* Feedback states reused from base.css palette, kept here too so
+     board-specific components can reference a single namespace */
+  --board-ok: #3ecf8e;
+  --board-fail: #ff6b6b;
+}

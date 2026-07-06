@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mancala — P2P</title>
+  <meta name="description" content="Peer-to-peer multiplayer Mancala, no server required.">
+  <link rel="stylesheet" href="./css/base.css">
+  <link rel="stylesheet" href="./css/board.css">
+  <link rel="stylesheet" href="./css/themes.css">
+</head>
+<body>
+  <noscript>
+    <p style="padding:1rem;font-family:sans-serif;">
+      Mancala needs JavaScript enabled to run (it uses WebRTC for peer-to-peer play).
+      Please enable JavaScript and reload this page.
+    </p>
+  </noscript>
+
+  <!-- Screens: exactly one is visible at a time, toggled via showScreen() in js/main.js -->
+  <main id="app">
+    <section id="screen-boot" class="screen" data-screen="boot" aria-live="polite">
+      <!-- Phase 1: brief boot flash before routing to diag. Later phases: splash/logo. -->
+    </section>
+
+    <section id="screen-menu" class="screen" hidden data-screen="menu">
+      <!-- Phase 3: main menu (host / join / spectate) -->
+    </section>
+
+    <section id="screen-lobby" class="screen" hidden data-screen="lobby">
+      <!-- Phase 3: public lobby list -->
+    </section>
+
+    <section id="screen-wait" class="screen" hidden data-screen="wait">
+      <!-- Phase 3: waiting room for opponent/spectators -->
+    </section>
+
+    <section id="screen-game" class="screen" hidden data-screen="game">
+      <!-- Phase 2/4: the Mancala board itself -->
+    </section>
+
+    <section id="screen-over" class="screen" hidden data-screen="over">
+      <!-- Phase 2: game-over summary / rematch -->
+    </section>
+
+    <section id="diag-panel" class="screen" hidden data-screen="diag" aria-live="polite">
+      <!-- Phase 1: diagnostics checklist, rendered live by js/diag.js -->
+    </section>
+  </main>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

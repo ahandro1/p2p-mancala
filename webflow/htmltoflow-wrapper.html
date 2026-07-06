@@ -1,0 +1,144 @@
+<!--
+  MANCALA — Webflow HTMLtoFlow conversion package
+  =================================================
+  Purpose: paste into the HTMLtoFlow Webflow Designer app to auto-generate
+  native Webflow elements + classes on a FREE Webflow plan. This is the
+  decorative shell/frame that will surround the game iframe on the live
+  Webflow page. The iframe itself is added BY HAND afterwards (see
+  webflow/snippets.md) — nothing here is a working game embed.
+
+  Conversion constraints followed (do not violate when editing):
+    - Vanilla HTML + CSS3 only. No <script>, no <iframe>, no <link>,
+      no @import, no inline event handlers.
+    - Exactly ONE class per element (Webflow combo classes only keep the
+      first class listed, so multi-class elements would silently lose
+      classes on conversion).
+    - Simple class selectors only (.classname). No descendant/child
+      combinators, no attribute selectors, no ::before/::after, no
+      var()/custom properties, no @keyframes. :hover is fine.
+    - Literal color values only (no functions besides linear-gradient,
+      which Webflow's background-gradient control understands natively).
+    - System font stack only for now. Swap to a Google Font (try
+      "Lilita One" for that Club-Penguin-arcade italic-comic look) later
+      using Webflow's own font picker on the mancala-title class — do not
+      add @font-face or <link> here, Webflow manages font loading itself.
+    - No id attributes, no custom/data attributes.
+    - No images — the glossy "arcade" panel look is built from gradients,
+      border-radius, and box-shadow only.
+
+  HOW TO PASTE:
+    - If HTMLtoFlow accepts one combined paste, paste the whole file as-is.
+    - If it has separate CSS and HTML inputs, split at the
+      "===== SPLIT HERE ===== " delimiter comment below: everything above
+      goes in the CSS box, everything below (from <section ...) goes in
+      the HTML box.
+-->
+
+<style>
+  /* ===== Outer shell — the glossy azure/royal-blue arcade panel ===== */
+  .mancala-shell {
+    background-image: linear-gradient(180deg, #29b8f2 0%, #0f9ee8 35%, #0b6bc4 100%);
+    border-style: solid;
+    border-width: 6px;
+    border-color: #eaf7ff;
+    border-radius: 28px;
+    box-shadow: 0px 10px 0px 0px #06437a;
+    padding: 32px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ===== Heading bar ===== */
+  .mancala-title {
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: 900;
+    font-style: italic;
+    font-size: 52px;
+    line-height: 1.05;
+    color: #ffffff;
+    text-align: center;
+    text-shadow: 0px 3px 0px #06437a;
+    letter-spacing: 2px;
+    margin-top: 0px;
+    margin-bottom: 8px;
+  }
+
+  .mancala-subtitle {
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: 700;
+    font-style: italic;
+    font-size: 18px;
+    color: #eaf7ff;
+    text-align: center;
+    margin-top: 0px;
+    margin-bottom: 28px;
+  }
+
+  /* ===== Embed slot — placeholder for the hand-added iframe ===== */
+  .mancala-embed-slot {
+    min-height: 85vh;
+    background-color: #0a4f8f;
+    border-style: dashed;
+    border-width: 3px;
+    border-color: #eaf7ff;
+    border-radius: 18px;
+    box-shadow: inset 0px 4px 0px 0px #06437a;
+    margin-bottom: 28px;
+  }
+
+  /* ===== Fallback play button — glossy golden arcade button ===== */
+  .mancala-play-btn {
+    display: block;
+    width: 260px;
+    margin-left: auto;
+    margin-right: auto;
+    background-image: linear-gradient(180deg, #ffe680 0%, #f2c400 45%, #c98a00 100%);
+    border-style: solid;
+    border-width: 4px;
+    border-color: #06437a;
+    border-radius: 999px;
+    box-shadow: 0px 6px 0px 0px #06437a;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    padding-left: 24px;
+    padding-right: 24px;
+    text-align: center;
+    text-decoration: none;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: 900;
+    font-style: italic;
+    font-size: 22px;
+    color: #06437a;
+    margin-bottom: 24px;
+  }
+
+  .mancala-play-btn:hover {
+    background-image: linear-gradient(180deg, #fff0b3 0%, #ffd633 45%, #dba000 100%);
+    box-shadow: 0px 3px 0px 0px #06437a;
+  }
+
+  /* ===== Footer line ===== */
+  .mancala-footnote {
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: 400;
+    font-style: italic;
+    font-size: 14px;
+    color: #eaf7ff;
+    text-align: center;
+    margin-top: 0px;
+    margin-bottom: 0px;
+  }
+</style>
+
+<!-- ===== SPLIT HERE ===== -->
+
+<section class="mancala-shell">
+  <h1 class="mancala-title">MANCALA</h1>
+  <p class="mancala-subtitle">Live multiplayer &mdash; play a friend right here</p>
+  <div class="mancala-embed-slot">
+    <!-- Webflow: place the hand-made iframe Custom Element INSIDE this div, then delete this comment -->
+  </div>
+  <a class="mancala-play-btn" href="https://REPLACE-WITH-GAME-URL" target="_blank">Play Mancala</a>
+  <p class="mancala-footnote">Peer-to-peer &middot; no accounts &middot; free forever</p>
+</section>
