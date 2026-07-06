@@ -133,8 +133,21 @@ export function connectRoom(roomId) {
 
   const handlePromise = (async () => {
     const trystero = await loadTrystero();
+    /*
+     * Match rooms use a SEPARATE appId namespace from the lobby room.
+     * Empirically verified (2026-07-06, live cross-device test): when one
+     * page joins two Trystero rooms under the SAME appId, the first room's
+     * announcements stop being delivered within seconds (internal state
+     * collision in the Nostr strategy), which silently removed every
+     * hosting player from the lobby list the moment they created a match.
+     * Namespacing match rooms under `${appId}-match` fully isolates the
+     * two rooms; both peers derive the same namespace, so compatibility
+     * is unaffected. Do NOT "simplify" this back to one appId.
+     */
+    const appId =
+      roomId === CONFIG.lobbyRoomId ? CONFIG.appId : `${CONFIG.appId}-match`;
     const room = trystero.joinRoom(
-      { appId: CONFIG.appId, rtcConfig: CONFIG.rtcConfig },
+      { appId, rtcConfig: CONFIG.rtcConfig },
       roomId
     );
 
