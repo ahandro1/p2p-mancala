@@ -296,7 +296,7 @@ let activeAnnouncement = null;
  * CONFIG.heartbeatMs, and immediately whenever the announcement is patched
  * (e.g. a status change from 'waiting' to 'playing').
  * @param {RoomHandle} lobby - a connected lobby room handle (connectLobby())
- * @param {{gameId: string, hostName: string, theme?: string, hasPassword: boolean, status?: 'waiting'|'playing'|'full', createdAt?: number}} info
+ * @param {{gameId: string, hostName: string, theme?: string, hasPassword: boolean, allowSpectators?: boolean, status?: 'waiting'|'playing'|'full', createdAt?: number}} info
  * @returns {{updateAnnouncement: function(Object): void, stop: function(): void}}
  *   `updateAnnouncement(patch)` merges `patch` into the announced payload and
  *   broadcasts immediately; `stop()` halts the heartbeat.
@@ -310,6 +310,9 @@ export function announceGame(lobby, info) {
     hostName: info.hostName,
     theme: info.theme ?? null,
     hasPassword: !!info.hasPassword,
+    // Default true so old clients (pre-dating this field) that never send it
+    // still get the Watch button in renderLobbyList's allowSpectators!==false check.
+    allowSpectators: info.allowSpectators !== false,
     status: info.status ?? 'waiting',
     createdAt: info.createdAt ?? Date.now(),
   };
@@ -357,7 +360,7 @@ export function stopAnnouncing() {
  * peer leaves the lobby room. `onUpdate` is invoked with a fresh sorted
  * array on every change (add / update-with-status-change / removal).
  * @param {RoomHandle} lobby - a connected lobby room handle (connectLobby())
- * @param {function(Array<{gameId: string, hostName: string, theme: any, hasPassword: boolean, status: string, createdAt: number, hostPeerId: string, lastSeen: number}>): void} onUpdate
+ * @param {function(Array<{gameId: string, hostName: string, theme: any, hasPassword: boolean, allowSpectators: boolean, status: string, createdAt: number, hostPeerId: string, lastSeen: number}>): void} onUpdate
  *   Called with the current full list of known live games whenever it changes.
  * @returns {function(): void} unsubscribe function (removes listeners + timer)
  */
@@ -381,6 +384,9 @@ export function watchLobbies(lobby, onUpdate) {
       hostName: data.hostName,
       theme: data.theme ?? null,
       hasPassword: !!data.hasPassword,
+      // Old hosts that predate this field never send it; default true so they
+      // keep behaving as spectator-friendly (renderLobbyList checks !== false).
+      allowSpectators: data.allowSpectators !== false,
       status: data.status ?? 'waiting',
       createdAt: data.createdAt ?? Date.now(),
       hostPeerId: meta.peerId,
@@ -395,6 +401,7 @@ export function watchLobbies(lobby, onUpdate) {
       prev.status !== entry.status ||
       prev.hostName !== entry.hostName ||
       prev.hasPassword !== entry.hasPassword ||
+      prev.allowSpectators !== entry.allowSpectators ||
       prev.hostPeerId !== entry.hostPeerId;
     if (changed) emit();
   });
@@ -517,19 +524,21 @@ export async function requestJoin(lobby, opts) {
  *     it; the announcement flips to status 'playing' and later player requests
  *     are rejected with reason 'full'.
  *   - Up to CONFIG.maxSpectators spectators, accepted while under the cap and
- *     rejected with 'full' once at the cap.
+ *     rejected with 'full' once at the cap. When opts.allowSpectators is
+ *     false, every spectator joinReq is rejected with 'full' regardless of
+ *     the cap (the host disabled spectating for this game).
  *   - Password: when hasPassword is true, the request's passwordHash must
  *     equal hashPassword(gameId, password); mismatch is rejected with
  *     'wrongPassword'. When hasPassword is false, the check is skipped.
  *
  * @param {RoomHandle} lobby - a connected lobby room handle (connectLobby())
- * @param {{gameId: string, hostName: string, theme?: string, password?: string}} opts
+ * @param {{gameId: string, hostName: string, theme?: string, password?: string, allowSpectators?: boolean}} opts
  * @returns {Promise<{announcement: {updateAnnouncement: function(Object): void, stop: function(): void}, stop: function(): void, getState: function(): {playerTaken: boolean, spectatorCount: number}}>}
  *   Resolves once the expected password hash is computed and listeners are
  *   installed. `stop()` tears down the join listener AND stops announcing.
  */
 export async function createHostedGame(lobby, opts) {
-  const { gameId, hostName, theme, password } = opts;
+  const { gameId, hostName, theme, password, allowSpectators = true } = opts;
   const hasPassword = !!password;
   // Precompute the expected hash once; joinReq handling stays synchronous and
   // therefore race-free against concurrent requests (see message-flow notes).
@@ -542,6 +551,7 @@ export async function createHostedGame(lobby, opts) {
     hostName,
     theme,
     hasPassword,
+    allowSpectators,
     status: 'waiting',
   });
 
@@ -585,6 +595,10 @@ export async function createHostedGame(lobby, opts) {
     }
 
     // role === 'spectator'
+    if (!allowSpectators) {
+      reply(false, 'spectator', 'full');
+      return;
+    }
     if (spectators.size >= CONFIG.maxSpectators) {
       reply(false, 'spectator', 'full');
       return;
@@ -681,6 +695,15 @@ export async function hashPassword(gameId, password) {
  *   Fires (peerId, role) when a peer leaves. For the guest player, role is
  *   'player' on the initial drop and 'player-final' after grace elapses.
  * @property {function((function(string): void)): (function(): void)} onRematch
+ * @property {function((function(string): void)): (function(): void)} onPeerJoin
+ *   Thin passthrough to the underlying room's peer-join event (raw Trystero
+ *   peerId, fired for ANY peer joining this match room — player, spectator,
+ *   or a reconnecting player under a new peerId). Added for the waiting-
+ *   screen status line, which wants to say "Opponent connecting…" the moment
+ *   a peer shows up, without waiting for the slower 'hello' handshake.
+ * @property {function(): number} getPeerCount - passthrough to the underlying
+ *   room's current peer count (excludes self). Same telemetry use case as
+ *   onPeerJoin above.
  * @property {function(): any} getState - the last known state (host: authoritative).
  * @property {function(string=): void} leaveGame - leave + clean up timers/announcements.
  */
@@ -729,6 +752,7 @@ export async function joinGameRoom(opts) {
   const helloCbs = [];
   const goneCbs = [];
   const rematchCbs = [];
+  const peerJoinCbs = [];
   const fan = (arr) => (cb) => {
     arr.push(cb);
     return () => {
@@ -886,6 +910,7 @@ export async function joinGameRoom(opts) {
   // hello), so re-sending per peer-join is safe.
   room.onPeerJoin((peerId) => {
     room.send('hello', { name, role: isHost ? 'player' : role }, peerId);
+    dispatch(peerJoinCbs, peerId);
   });
 
   // ---- session object -------------------------------------------------------
@@ -945,8 +970,10 @@ export async function joinGameRoom(opts) {
     onPeerHello: fan(helloCbs),
     onPeerGone: fan(goneCbs),
     onRematch: fan(rematchCbs),
+    onPeerJoin: fan(peerJoinCbs),
 
     getState: () => currentState,
+    getPeerCount: () => room.getPeers().length,
 
     leaveGame(reason) {
       // Politely tell peers we're going so they don't wait out the grace timer

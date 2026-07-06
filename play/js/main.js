@@ -30,6 +30,8 @@ import {
   renderMenu,
   renderLobbyList,
   renderWaiting,
+  updateWaitingStatus,
+  updateWaitingElapsed,
   renderGameHud,
   renderGameOver,
 } from './ui.js';
@@ -132,6 +134,43 @@ function freshAppState() {
 }
 
 // ---------------------------------------------------------------------------
+// Waiting-screen telemetry
+//
+// Drives ui.js's wait-screen status line + elapsed counter across the
+// connection lifecycle (lobby -> peer connecting -> connected -> game). The
+// elapsed counter also doubles as remote debugging telemetry while chasing
+// the cross-device waiting-screen deadlock — a stuck screen now visibly
+// reports how long it's been stuck and at what stage.
+// ---------------------------------------------------------------------------
+
+/** @type {ReturnType<typeof setInterval>|null} */
+let waitElapsedTimer = null;
+/** Wall-clock start of the current wait, for the elapsed counter. */
+let waitStartedAt = 0;
+
+/** Starts the wait-screen elapsed-counter ticker. Call once per wait screen entry. */
+function startWaitTelemetry() {
+  stopWaitTelemetry();
+  waitStartedAt = Date.now();
+  updateWaitingElapsed(null);
+  waitElapsedTimer = setInterval(() => {
+    const secs = Math.floor((Date.now() - waitStartedAt) / 1000);
+    if (secs >= 15) {
+      updateWaitingElapsed(`still trying — ${secs}s`);
+    }
+  }, 1000);
+}
+
+/** Stops the wait-screen elapsed-counter ticker and hides the elapsed line. */
+function stopWaitTelemetry() {
+  if (waitElapsedTimer) {
+    clearInterval(waitElapsedTimer);
+    waitElapsedTimer = null;
+  }
+  updateWaitingElapsed(null);
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
@@ -154,6 +193,7 @@ async function boot() {
 
 /** Returns to the menu, tearing down any active session/lobby watch first. */
 function goToMenu() {
+  stopWaitTelemetry();
   teardownMatch();
   teardownLobbyWatch();
   app = freshAppState();
@@ -174,7 +214,8 @@ async function handleCreateGame(opts) {
   app.myPlayer = 0;
 
   showScreen('screen-wait');
-  renderWaiting({ code: app.gameId, onCancel: handleCancelWaiting });
+  renderWaiting({ role: 'host', statusText: 'Getting things ready…', onCancel: handleCancelWaiting });
+  startWaitTelemetry();
 
   const theme = readStoredTheme();
 
@@ -186,8 +227,11 @@ async function handleCreateGame(opts) {
     hostName: app.name,
     theme: theme && theme.board,
     password: opts.password || undefined,
+    allowSpectators: opts.allowSpectators,
   });
   app.hostedGame = hostedGame;
+
+  updateWaitingStatus('In the lobby — players can find your game');
 
   const session = await joinGameRoom({
     gameId: app.gameId,
@@ -201,11 +245,18 @@ async function handleCreateGame(opts) {
 
   wireSessionCommon(session);
 
+  // A match-room peer connecting (guest or spectator) means someone found the
+  // game and is handshaking; the 'hello' below confirms who they are.
+  const offWaitPeerJoin = session.onPeerJoin(() => {
+    updateWaitingStatus('Opponent connecting…');
+  });
+
   // Start the game once the guest player's hello arrives.
   const offHello = session.onPeerHello((info) => {
     if (info.role !== 'player') return; // spectators don't start the match
     app.opponentName = info.name;
     offHello();
+    offWaitPeerJoin();
     const state = engine.newGame();
     session.setState(state, { currentPlayer: state.currentPlayer, lastMoveEvents: [] });
     enterGameScreen();
@@ -223,12 +274,12 @@ function handleCancelWaiting() {
 async function handleBrowse() {
   showScreen('screen-lobby');
   renderLobbyList([], { onBack: goToMenu });
-  // WORKAROUND: ui.js's renderLobbyList() returns early when games.length===0
-  // (the "No open games" empty state), before it reaches the code that wires
-  // #lobby-back's onclick — so the Back button is left dead whenever the
-  // lobby is empty (which includes this very first call, and any time the
-  // list drops back to zero games). Wire it directly here so Back always
-  // works regardless of ui.js's internal early return.
+  // WORKAROUND (source now fixed): ui.js's renderLobbyList() used to return
+  // early when games.length===0 (the "No open games" empty state) BEFORE
+  // wiring #lobby-back's onclick, leaving Back dead whenever the lobby was
+  // empty. That's fixed at the source now (Back is wired before the early
+  // return in ui.js), so this is harmless redundant belt-and-suspenders
+  // wiring — left in place rather than removed to avoid churn.
   const backBtn = document.getElementById('lobby-back');
   if (backBtn) backBtn.onclick = () => goToMenu();
 
@@ -243,6 +294,7 @@ async function handleBrowse() {
       hostName: g.hostName,
       theme: g.theme,
       hasPassword: g.hasPassword,
+      allowSpectators: g.allowSpectators,
       status: g.status === 'playing' ? 'playing' : 'open',
     }));
     renderLobbyList(mapped, {
@@ -291,6 +343,10 @@ async function handleJoinGame(gameId, password) {
   app.role = 'player';
   app.myPlayer = 1;
 
+  showScreen('screen-wait');
+  renderWaiting({ role: 'player', statusText: 'Connecting to host…', onCancel: handleCancelWaiting });
+  startWaitTelemetry();
+
   const session = await joinGameRoom({
     gameId,
     role: 'player',
@@ -300,8 +356,13 @@ async function handleJoinGame(gameId, password) {
   app.session = session;
   wireSessionCommon(session);
 
-  showScreen('screen-wait');
-  renderWaiting({ code: gameId, onCancel: handleCancelWaiting });
+  // The host's match-room peer is who we're connecting to; its join event
+  // fires as soon as the WebRTC connection is up, well before the slower
+  // 'hello'/'state' handshake completes.
+  const offWaitPeerJoin = session.onPeerJoin(() => {
+    updateWaitingStatus('Connected — waiting for the board…');
+    offWaitPeerJoin();
+  });
 
   // The host pushes 'state' as soon as our hello arrives; onState (wired in
   // wireSessionCommon) will call enterGameScreen() the first time it fires.
@@ -330,6 +391,10 @@ async function handleWatchGame(gameId) {
   app.role = 'spectator';
   app.myPlayer = null;
 
+  showScreen('screen-wait');
+  renderWaiting({ role: 'spectator', statusText: 'Connecting to host…', onCancel: handleCancelWaiting });
+  startWaitTelemetry();
+
   const session = await joinGameRoom({
     gameId,
     role: 'spectator',
@@ -339,8 +404,10 @@ async function handleWatchGame(gameId) {
   app.session = session;
   wireSessionCommon(session);
 
-  showScreen('screen-wait');
-  renderWaiting({ code: gameId, onCancel: handleCancelWaiting });
+  const offWaitPeerJoin = session.onPeerJoin(() => {
+    updateWaitingStatus('Connected — waiting for the board…');
+    offWaitPeerJoin();
+  });
 }
 
 /** @param {string|undefined} reason */
@@ -459,6 +526,7 @@ function handleIncomingState(data) {
 }
 
 function enterGameScreen() {
+  stopWaitTelemetry();
   showScreen('screen-game');
   showChat({
     messages: [],

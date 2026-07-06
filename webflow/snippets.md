@@ -15,7 +15,7 @@ points an iframe at the deployed URL.
 
    | Attribute | Value |
    |---|---|
-   | `src` | `https://ahandro1.github.io/p2p-mancala/play/` *(placeholder — the foreman will fill in the real URL after the first deploy)* |
+   | `src` | `https://ahandro1.github.io/p2p-mancala/play/` |
    | `allow` | `fullscreen` |
    | `loading` | `lazy` |
    | `title` | `Mancala` |
@@ -82,6 +82,8 @@ If every row is green (or informational, for Environment) in at least two
 simultaneous sessions, the full pipeline — GitHub Pages, ES modules, Trystero,
 Nostr signaling, and WebRTC data channels — is confirmed working end to end.
 
+**Troubleshooting browsers cache:** After a new deploy, browsers may serve cached game code for up to 10 minutes (GitHub Pages sets `max-age=600`). To bypass the cache during testing, use a private/incognito window.
+
 ## 5. HTMLtoFlow wrapper test
 
 `webflow/htmltoflow-wrapper.html` is a self-contained HTML+CSS package — the
@@ -137,9 +139,8 @@ to this table before moving on — later steps assume these exact class names.
       button appears to "press" slightly (shadow shrinks). If the hover
       state didn't survive conversion, re-create it manually as an
       Interaction/state on the class.
-- [ ] **Button links out correctly** — for now it points at the
-      placeholder `https://ahandro1.github.io/p2p-mancala/play/`; swap in the real
-      GitHub Pages URL once deployed, same as the iframe `src` in section 1.
+- [ ] **Button links out correctly** — it points at
+      `https://ahandro1.github.io/p2p-mancala/play/`, same as the iframe `src` in section 1.
 - [ ] **No stray elements** — HTMLtoFlow shouldn't have invented extra
       wrapper divs beyond normal Webflow structure; if it did, that's
       usually harmless but worth a glance.

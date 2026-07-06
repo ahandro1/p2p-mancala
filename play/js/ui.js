@@ -792,6 +792,13 @@ export function renderLobbyList(games = [], handlers = {}) {
   if (!list) return;
   list.innerHTML = '';
 
+  // Wire Back BEFORE the empty-games early return below — it used to sit
+  // after the row-building loop, so Back was left dead whenever the list was
+  // empty (including the very first render). main.js also wires #lobby-back
+  // itself as a belt-and-suspenders workaround; that's harmless now but kept.
+  const back = $('lobby-back');
+  if (back) back.onclick = () => handlers.onBack && handlers.onBack();
+
   if (!games.length) {
     const empty = document.createElement('li');
     empty.className = 'lobby-empty';
@@ -844,21 +851,58 @@ export function renderLobbyList(games = [], handlers = {}) {
     }
     list.appendChild(row);
   }
-
-  const back = $('lobby-back');
-  if (back) back.onclick = () => handlers.onBack && handlers.onBack();
 }
 
 /**
- * Renders the waiting room after creating a game.
- * @param {{code:string, onCancel?:()=>void}} props
+ * Renders the waiting room shown after creating or joining a game. No game
+ * code is displayed here (Phase 4 removed it — it confused players and had
+ * no purpose once the lobby handles discovery). Instead this screen shows a
+ * role-appropriate heading, a spinner, and a status line that the caller
+ * drives across the connection lifecycle via updateWaitingStatus().
+ * @param {{role?:'host'|'player'|'spectator', statusText?:string, onCancel?:()=>void}} props
  * @returns {void}
  */
-export function renderWaiting({ code = '------', onCancel } = {}) {
-  const codeEl = $('wait-code');
-  if (codeEl) codeEl.textContent = code;
+export function renderWaiting({ role = 'host', statusText = 'Getting things ready…', onCancel } = {}) {
+  const heading = $('wait-heading');
+  if (heading) {
+    heading.textContent = role === 'host' ? 'Waiting for an opponent…' : 'Joining game…';
+  }
+  updateWaitingStatus(statusText);
+  const elapsed = $('wait-elapsed');
+  if (elapsed) { elapsed.hidden = true; elapsed.textContent = ''; }
   const cancel = $('wait-cancel');
   if (cancel) cancel.onclick = () => onCancel && onCancel();
+}
+
+/**
+ * Updates just the wait screen's status line, without touching the heading
+ * or re-wiring Cancel. Used by main.js to reflect connection-lifecycle
+ * progress (lobby -> peer connecting -> connected) without a full re-render.
+ * @param {string} text
+ * @returns {void}
+ */
+export function updateWaitingStatus(text) {
+  const statusEl = $('wait-status-text');
+  if (statusEl) statusEl.textContent = text;
+}
+
+/**
+ * Shows/updates the "still trying — Ns" elapsed line on the wait screen.
+ * Pass null/undefined to hide it. Doubles as debugging telemetry for
+ * diagnosing stalled handshakes.
+ * @param {string|null} [text]
+ * @returns {void}
+ */
+export function updateWaitingElapsed(text) {
+  const el = $('wait-elapsed');
+  if (!el) return;
+  if (!text) {
+    el.hidden = true;
+    el.textContent = '';
+  } else {
+    el.hidden = false;
+    el.textContent = text;
+  }
 }
 
 /**

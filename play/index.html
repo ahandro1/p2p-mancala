@@ -81,10 +81,12 @@
 
     <section id="screen-wait" class="screen screen--centered" hidden data-screen="wait">
       <div class="wait-card panel">
-        <h2 class="screen-title">Game created</h2>
-        <p class="wait-label">Share this code with your opponent:</p>
-        <div id="wait-code" class="game-code">------</div>
-        <p class="wait-status"><span class="spinner" aria-hidden="true"></span> waiting for opponent…</p>
+        <h2 id="wait-heading" class="screen-title">Waiting for an opponent…</h2>
+        <p class="wait-dots" aria-hidden="true"><span></span><span></span><span></span></p>
+        <p class="wait-status">
+          <span id="wait-status-text">Getting things ready…</span>
+        </p>
+        <p id="wait-elapsed" class="wait-elapsed" hidden></p>
         <button id="wait-cancel" type="button" class="btn btn--secondary">Cancel</button>
       </div>
     </section>
