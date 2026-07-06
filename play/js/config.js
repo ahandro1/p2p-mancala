@@ -103,12 +103,14 @@ export const CONFIG = {
   chatMaxLen: 280,
 
   /**
-   * Visual theme catalog. Phase 1 ships a single placeholder entry per
-   * category; Phase 4 will expand these lists and wire them to
-   * css/themes.css custom properties via ui.js setTheme().
+   * Visual theme catalog. Mirrors the id lists baked into ui.js's
+   * BOARD_THEMES / STONE_THEMES (the authoritative source — ui.js owns the
+   * label/swatch/CSS-variable details; this is just the id list for any
+   * other module that needs to know what themes exist without importing
+   * ui.js). Keep in sync by hand if ui.js's catalogs change.
    */
   themes: {
-    board: ['walnut'],
-    stones: ['glass'],
+    board: ['arcade', 'walnut', 'midnight-neon'],
+    stones: ['candy', 'glass', 'neon', 'frog'],
   },
 };

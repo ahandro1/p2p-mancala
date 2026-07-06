@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mancala — P2P</title>
   <meta name="description" content="Peer-to-peer multiplayer Mancala, no server required.">
+  <!-- Display font for the arcade skin (see docs/default-skin-reference.md). CSS provides a system fallback. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap">
   <link rel="stylesheet" href="./css/base.css">
   <link rel="stylesheet" href="./css/board.css">
   <link rel="stylesheet" href="./css/themes.css">
@@ -23,24 +27,116 @@
       <!-- Phase 1: brief boot flash before routing to diag. Later phases: splash/logo. -->
     </section>
 
-    <section id="screen-menu" class="screen" hidden data-screen="menu">
-      <!-- Phase 3: main menu (host / join / spectate) -->
+    <section id="screen-menu" class="screen screen--centered" hidden data-screen="menu">
+      <!-- Content rendered/hydrated by js/ui.js renderMenu(); markup here is the static shell. -->
+      <div class="menu-card panel">
+        <h1 class="app-title">Mancala</h1>
+        <p class="app-tagline">Peer-to-peer. No server. Just play.</p>
+
+        <label class="field">
+          <span class="field-label">Your name</span>
+          <input id="menu-name" class="text-input" type="text" maxlength="24"
+                 autocomplete="off" placeholder="Player" />
+        </label>
+
+        <fieldset class="field theme-picker">
+          <legend class="field-label">Theme</legend>
+          <div class="theme-preview" id="menu-theme-preview" aria-hidden="true"></div>
+          <div class="theme-row">
+            <span class="theme-row-label">Board</span>
+            <div id="menu-board-swatches" class="swatch-row" role="radiogroup" aria-label="Board theme"></div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Stones</span>
+            <div id="menu-stone-swatches" class="swatch-row" role="radiogroup" aria-label="Stone set"></div>
+          </div>
+        </fieldset>
+
+        <form id="menu-create-form" class="create-form">
+          <label class="field">
+            <span class="field-label">Password <span class="field-hint">(optional)</span></span>
+            <input id="menu-password" class="text-input" type="text" maxlength="32"
+                   autocomplete="off" placeholder="Leave blank for open game" />
+          </label>
+          <label class="checkbox-field">
+            <input id="menu-spectators" type="checkbox" checked />
+            <span>Allow spectators</span>
+          </label>
+          <button type="submit" class="btn btn--primary">Create Game</button>
+        </form>
+
+        <button id="menu-browse" type="button" class="btn btn--secondary">Browse Games</button>
+      </div>
     </section>
 
     <section id="screen-lobby" class="screen" hidden data-screen="lobby">
-      <!-- Phase 3: public lobby list -->
+      <div class="lobby-wrap panel">
+        <header class="screen-head">
+          <button id="lobby-back" type="button" class="btn btn--ghost btn--back">‹ Back</button>
+          <h2 class="screen-title">Open Games</h2>
+        </header>
+        <ul id="lobby-list" class="lobby-list"><!-- rows injected by renderLobbyList() --></ul>
+      </div>
     </section>
 
-    <section id="screen-wait" class="screen" hidden data-screen="wait">
-      <!-- Phase 3: waiting room for opponent/spectators -->
+    <section id="screen-wait" class="screen screen--centered" hidden data-screen="wait">
+      <div class="wait-card panel">
+        <h2 class="screen-title">Game created</h2>
+        <p class="wait-label">Share this code with your opponent:</p>
+        <div id="wait-code" class="game-code">------</div>
+        <p class="wait-status"><span class="spinner" aria-hidden="true"></span> waiting for opponent…</p>
+        <button id="wait-cancel" type="button" class="btn btn--secondary">Cancel</button>
+      </div>
     </section>
 
-    <section id="screen-game" class="screen" hidden data-screen="game">
-      <!-- Phase 2/4: the Mancala board itself -->
+    <section id="screen-game" class="screen screen--game" hidden data-screen="game">
+      <div class="game-hud" id="game-hud">
+        <div class="hud-player hud-player--1" data-player="0">
+          <span class="hud-name" id="hud-name-0">Player 1</span>
+          <span class="hud-score" id="hud-score-0">0</span>
+        </div>
+        <div class="hud-center">
+          <span class="turn-indicator" id="turn-indicator">Your turn</span>
+          <span class="spectate-badge" id="spectate-badge" hidden>SPECTATING</span>
+        </div>
+        <div class="hud-player hud-player--2" data-player="1">
+          <span class="hud-name" id="hud-name-1">Player 2</span>
+          <span class="hud-score" id="hud-score-1">0</span>
+        </div>
+      </div>
+
+      <div class="board-stage">
+        <div id="board" class="board" data-board-theme="arcade" data-stone-theme="candy">
+          <!-- pit/store/stone DOM built by renderBoard() -->
+        </div>
+      </div>
+
+      <!-- Chat drawer: side panel on desktop, slide-up sheet on mobile -->
+      <div id="chat" class="chat" data-open="false">
+        <button id="chat-handle" type="button" class="chat-handle" aria-expanded="false">
+          <span class="chat-handle-label">Chat</span>
+          <span id="chat-unread" class="chat-unread" hidden>0</span>
+        </button>
+        <div class="chat-panel">
+          <div id="chat-log" class="chat-log" aria-live="polite"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" class="text-input chat-input" type="text"
+                   maxlength="280" autocomplete="off" placeholder="Say something…" />
+            <button type="submit" class="btn btn--primary chat-send">Send</button>
+          </form>
+        </div>
+      </div>
     </section>
 
-    <section id="screen-over" class="screen" hidden data-screen="over">
-      <!-- Phase 2: game-over summary / rematch -->
+    <section id="screen-over" class="screen screen--centered" hidden data-screen="over">
+      <div class="over-card panel">
+        <div id="over-banner" class="over-banner">Game Over</div>
+        <div id="over-score" class="over-score">0 – 0</div>
+        <div class="over-actions">
+          <button id="over-rematch" type="button" class="btn btn--primary">Rematch</button>
+          <button id="over-leave" type="button" class="btn btn--secondary">Leave</button>
+        </div>
+      </div>
     </section>
 
     <section id="diag-panel" class="screen" hidden data-screen="diag" aria-live="polite">

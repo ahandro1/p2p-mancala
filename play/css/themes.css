@@ -1,42 +1,190 @@
 /* ==========================================================================
    themes.css — CSS custom-property contract for board/stone theming.
 
-   Phase 4 will expand this into multiple selectable themes (matching the
-   CONFIG.themes.board / CONFIG.themes.stones lists in js/config.js, e.g.
-   `:root[data-theme-board="walnut"]`, `[data-theme-stones="glass"]`, etc.),
-   switched at runtime by js/ui.js's setTheme(). Only one default theme is
-   defined for now so Phase 4 has a working pattern to extend rather than
-   invent from scratch.
+   Themes are scoped by attributes on the board root element (#board):
+     - [data-board-theme="…"]  drives board/panel/pit/store colors
+     - [data-stone-theme="…"]  drives stone appearance
+   js/ui.js setTheme({board, stones}) sets those attributes and persists the
+   choice to localStorage 'mancala.theme'. board.css reads ONLY the variables
+   below, never hardcoded colors, so a swap never touches layout code.
 
-   Consumers (board.css, and inline styles in js/ui.js) should read these
-   variables rather than hardcoding colors, so a theme swap never requires
-   touching layout code.
+   ---------------------------------------------------------------------------
+   Per-theme contract (every board theme MUST define):
+     --board-bg      board surface fill (may be a gradient)
+     --board-edge    outer frame / dark outline color
+     --pit-bg        pit depression fill (may be a gradient)
+     --pit-shadow    inset shadow color giving the pit its "depth"
+     --store-bg      store (Kalah) fill (may be a gradient)
+     --panel-bg      app/screen backdrop for the board stage (gradient ok)
+     --pit-count-bg / --pit-count-fg / --pit-count-outline  count-badge pills
+
+   Per-stone-set contract (every stone theme MUST define):
+     --stone-fill     base stone color (used when no --stone-image)
+     --stone-outline  stone edge/outline color
+     --stone-spec     specular highlight color
+     --stone-image    OPTIONAL. url() for an image-based stone skin.
+                      *** BOTH static AND ANIMATED images work here: a plain
+                          PNG/SVG, an animated GIF, or an animated WebP all
+                          render as the stone. Animated skins simply loop.
+                          Real assets would live in play/assets/ (e.g.
+                          url('../assets/stones/frog.gif')). ***
+                      Default is `none` so gradient stones are used.
+
+   Stones cycle through 5 hues via --stone-c1..--stone-c5 so a pit's pile is
+   colorful; image stones ignore these (the image is used verbatim).
    ========================================================================== */
 
-:root {
-  /* Board surface */
-  --board-bg: #6b4a2f;
-  --board-border: #4a3220;
+/* ==========================================================================
+   BOARD THEMES
+   ========================================================================== */
 
-  /* Pit (the 12 player pits) */
-  --pit-bg: #3d2a1a;
-  --pit-border: #241708;
+/* ---- arcade (DEFAULT) — glossy late-2000s Flash arcade look ------------- */
+/* Follows docs/default-skin-reference.md: azure panel, golden glossy board,
+   amber-shaded inset pits. This is the default when no attribute is set. */
+:root,
+[data-board-theme="arcade"] {
+  --panel-bg: linear-gradient(180deg, #29b8f2 0%, #0f9ee8 45%, #0b6bc4 100%);
+  --panel-frame: #ffffff;
+  --panel-frame-edge: #0a4f96;
 
-  /* Store (the 2 Kalah end pits) */
-  --store-bg: #33220f;
-  --store-border: #1c1206;
+  --board-bg: radial-gradient(120% 140% at 50% 0%, #ffe066 0%, #f2c400 45%, #d99e00 100%);
+  --board-edge: #a86e00;
+  --board-rim: #c98a00;
 
-  /* Stones */
-  --stone-fill: #eae6da;
-  --stone-shadow: #00000055;
-  --stone-highlight: #ffffffaa;
+  --pit-bg: radial-gradient(120% 120% at 50% 18%, #b87f00 0%, #e9b400 55%, #ffdb5c 100%);
+  --pit-shadow: #8a5c00;
+  --pit-rim: #ffe98a;
 
-  /* Player accents (current-turn indicator, owned-pit highlight, etc.) */
-  --player-1-accent: #5da9ff;
-  --player-2-accent: #ff9d5d;
+  --store-bg: radial-gradient(120% 100% at 50% 10%, #b87f00 0%, #e9b400 55%, #ffdb5c 100%);
+  --store-shadow: #8a5c00;
 
-  /* Feedback states reused from base.css palette, kept here too so
-     board-specific components can reference a single namespace */
-  --board-ok: #3ecf8e;
-  --board-fail: #ff6b6b;
+  --pit-count-bg: #ffffff;
+  --pit-count-fg: #0a2e5c;
+  --pit-count-outline: #0a2e5c;
+
+  --hl-legal: #2ad06a;       /* legal-move glow */
+  --hl-turn: #2a6de0;
+
+  --font-display: "Lilita One", "Luckiest Guy", "Bangers", system-ui, sans-serif;
+}
+
+/* ---- walnut — warm wooden classic --------------------------------------- */
+[data-board-theme="walnut"] {
+  --panel-bg: linear-gradient(180deg, #3a2a1c 0%, #26190f 100%);
+  --panel-frame: #6b4a2f;
+  --panel-frame-edge: #1c1206;
+
+  --board-bg: radial-gradient(120% 140% at 50% 0%, #8a5f3a 0%, #6b4a2f 55%, #4a3220 100%);
+  --board-edge: #2c1d10;
+  --board-rim: #5a3d26;
+
+  --pit-bg: radial-gradient(120% 120% at 50% 18%, #241708 0%, #3d2a1a 60%, #533a25 100%);
+  --pit-shadow: #140c04;
+  --pit-rim: #6b4a2f;
+
+  --store-bg: radial-gradient(120% 100% at 50% 10%, #1c1206 0%, #33220f 60%, #4a3220 100%);
+  --store-shadow: #100a03;
+
+  --pit-count-bg: #f4ecd9;
+  --pit-count-fg: #2c1d10;
+  --pit-count-outline: #2c1d10;
+
+  --hl-legal: #d9a441;
+  --hl-turn: #d9a441;
+
+  --font-display: "Lilita One", system-ui, sans-serif;
+}
+
+/* ---- midnight-neon — dark board with electric edges --------------------- */
+[data-board-theme="midnight-neon"] {
+  --panel-bg: linear-gradient(180deg, #0a0e1f 0%, #131a38 60%, #05070f 100%);
+  --panel-frame: #2a3a6a;
+  --panel-frame-edge: #05070f;
+
+  --board-bg: linear-gradient(180deg, #1a2244 0%, #10162e 100%);
+  --board-edge: #00e5ff;
+  --board-rim: #3a5cff;
+
+  --pit-bg: radial-gradient(120% 120% at 50% 20%, #05070f 0%, #10182e 60%, #1c2a52 100%);
+  --pit-shadow: #000000;
+  --pit-rim: #2a6de0;
+
+  --store-bg: radial-gradient(120% 100% at 50% 10%, #05070f 0%, #101a34 60%, #1c2a52 100%);
+  --store-shadow: #000000;
+
+  --pit-count-bg: #0a0e1f;
+  --pit-count-fg: #6ff0ff;
+  --pit-count-outline: #00e5ff;
+
+  --hl-legal: #00ffa3;
+  --hl-turn: #ff2ad0;
+
+  --font-display: "Lilita One", system-ui, sans-serif;
+}
+
+/* ==========================================================================
+   STONE SETS  (scoped by [data-stone-theme] on #board)
+   ========================================================================== */
+
+/* ---- candy (DEFAULT) — glossy candy discs, dark outline + white spec ----- */
+:root,
+[data-stone-theme="candy"] {
+  --stone-image: none;
+  --stone-outline: #1a1a2e;
+  --stone-spec: #ffffffcc;
+  --stone-fill: #e02a2a;
+  --stone-c1: #e02a2a; /* red    */
+  --stone-c2: #22b53a; /* green  */
+  --stone-c3: #2a6de0; /* blue   */
+  --stone-c4: #28c7e8; /* cyan   */
+  --stone-c5: #d02ad0; /* magenta*/
+}
+
+/* ---- glass — translucent frosted marbles -------------------------------- */
+[data-stone-theme="glass"] {
+  --stone-image: none;
+  --stone-outline: #ffffff55;
+  --stone-spec: #ffffff;
+  --stone-fill: #bcd4e6;
+  --stone-c1: #a7c7e7;
+  --stone-c2: #b8e0d2;
+  --stone-c3: #d6c8f0;
+  --stone-c4: #f0d6e0;
+  --stone-c5: #e0e8f0;
+}
+
+/* ---- neon — glowing pucks ------------------------------------------------ */
+[data-stone-theme="neon"] {
+  --stone-image: none;
+  --stone-outline: #05070f;
+  --stone-spec: #ffffff;
+  --stone-fill: #00ffa3;
+  --stone-c1: #00ffa3;
+  --stone-c2: #ff2ad0;
+  --stone-c3: #00e5ff;
+  --stone-c4: #ffe600;
+  --stone-c5: #b14aff;
+}
+
+/* ---- frog (IMAGE PATHWAY DEMO) -------------------------------------------
+   Proves the --stone-image contract using a tiny inline SVG data-URI so no
+   external asset is needed. A real skin would point --stone-image at a file
+   in play/assets/ and MAY be an animated GIF or animated WebP; board.css
+   renders whatever the URL resolves to (static or animated) as the stone. */
+[data-stone-theme="frog"] {
+  --stone-outline: #1c3a12;
+  --stone-spec: #ffffffcc;
+  --stone-fill: #4caf3a;
+  --stone-c1: #4caf3a;
+  --stone-c2: #4caf3a;
+  --stone-c3: #4caf3a;
+  --stone-c4: #4caf3a;
+  --stone-c5: #4caf3a;
+  --stone-image: url('data:image/svg+xml;utf8,\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">\
+<circle cx="16" cy="16" r="15" fill="%234caf3a" stroke="%231c3a12" stroke-width="2"/>\
+<circle cx="10" cy="10" r="4" fill="%23ffffff"/><circle cx="22" cy="10" r="4" fill="%23ffffff"/>\
+<circle cx="10" cy="11" r="2" fill="%23111"/><circle cx="22" cy="11" r="2" fill="%23111"/>\
+<path d="M9 20 q7 6 14 0" stroke="%231c3a12" stroke-width="2" fill="none" stroke-linecap="round"/>\
+</svg>');
 }

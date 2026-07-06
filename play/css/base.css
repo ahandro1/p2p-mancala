@@ -268,3 +268,342 @@ button {
     font-size: 1.3rem;
   }
 }
+
+/* ==========================================================================
+   Shared game-UI components (menu / lobby / wait / over screens).
+   Added in Phase 4. Diag styles above are untouched.
+   ========================================================================== */
+
+/* Screens that center a single card. */
+.screen--centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Arcade-ish panel used by menu/lobby/wait/over cards. */
+.panel {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.app-title {
+  font-family: "Lilita One", system-ui, sans-serif;
+  font-size: clamp(2.2rem, 10vw, 3rem);
+  text-align: center;
+  color: #ffd54a;
+  text-shadow: 0 3px 0 #0a2e5c, 0 0 12px rgba(0, 0, 0, 0.4);
+  transform: skewX(-6deg);
+  margin: 0;
+}
+
+.app-tagline {
+  text-align: center;
+  color: var(--color-text-dim);
+  font-size: 0.9rem;
+  margin-top: -0.5rem;
+}
+
+/* ---- Form fields --------------------------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.field-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  opacity: 0.8;
+}
+.text-input {
+  min-height: var(--touch-min);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 0.75rem;
+  color: var(--color-text);
+}
+.text-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--touch-min);
+  font-size: 0.95rem;
+}
+.checkbox-field input {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--color-accent);
+}
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.85rem;
+}
+
+/* ---- Buttons ------------------------------------------------------------- */
+.btn {
+  min-height: var(--touch-min);
+  padding: 0 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+.btn--primary {
+  background: var(--color-accent);
+  color: #0b1220;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+}
+.btn--primary:active { transform: translateY(1px); }
+.btn--secondary {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-dim);
+  border-color: transparent;
+}
+.btn--back { padding-left: 0.25rem; }
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Theme picker (menu) ------------------------------------------------- */
+.theme-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.theme-preview {
+  height: 68px;
+  border-radius: var(--radius-md);
+  border: 3px solid var(--tp-edge, #a86e00);
+  background: var(--tp-board, radial-gradient(120% 140% at 50% 0%, #ffe066, #f2c400 45%, #d99e00));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.3);
+}
+.theme-preview .tp-stone {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--tp-stone-outline, #1a1a2e);
+  background:
+    radial-gradient(circle at 32% 28%, var(--tp-stone-spec, #fff) 0%, transparent 40%),
+    radial-gradient(circle at 50% 55%, var(--tp-hue, #e02a2a), color-mix(in srgb, var(--tp-hue, #e02a2a) 70%, #000));
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.theme-row-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  width: 3.5rem;
+  flex: 0 0 auto;
+}
+.swatch-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.swatch {
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--color-border);
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+.swatch[aria-checked="true"] {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.swatch-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  font-size: 0.55rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  text-align: center;
+  padding: 1px 0;
+}
+
+/* ---- Lobby --------------------------------------------------------------- */
+.lobby-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: unset;
+}
+.screen-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.screen-title {
+  font-family: "Lilita One", system-ui, sans-serif;
+  font-size: 1.5rem;
+  color: var(--color-text);
+}
+.lobby-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.lobby-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.8rem;
+}
+.lobby-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.lobby-host {
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.lobby-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+.theme-chip {
+  font-size: 0.7rem;
+  padding: 0.1em 0.5em;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+}
+.status-chip {
+  font-size: 0.7rem;
+  padding: 0.1em 0.5em;
+  border-radius: 999px;
+}
+.status-chip--open { color: var(--color-ok); }
+.status-chip--playing { color: var(--color-info); }
+.lobby-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.lobby-empty {
+  text-align: center;
+  color: var(--color-text-dim);
+  padding: 2rem 1rem;
+  font-style: italic;
+}
+
+/* ---- Wait screen --------------------------------------------------------- */
+.wait-card {
+  align-items: center;
+  text-align: center;
+}
+.wait-label { color: var(--color-text-dim); font-size: 0.9rem; }
+.game-code {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  color: #ffd54a;
+  background: var(--color-bg);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+}
+.wait-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-dim);
+}
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
+/* ---- Game over ----------------------------------------------------------- */
+.over-card {
+  align-items: center;
+  text-align: center;
+}
+.over-banner {
+  font-family: "Lilita One", system-ui, sans-serif;
+  font-size: clamp(1.8rem, 9vw, 3rem);
+  transform: skewX(-6deg);
+  text-shadow: 0 3px 0 #0a2e5c;
+}
+.over-banner--win { color: #ffd54a; }
+.over-banner--lose { color: var(--color-text-dim); }
+.over-banner--tie { color: var(--color-info); }
+.over-score {
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+.over-actions {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+}
+.over-actions .btn { flex: 1; }
