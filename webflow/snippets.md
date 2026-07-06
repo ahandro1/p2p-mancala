@@ -15,7 +15,7 @@ points an iframe at the deployed URL.
 
    | Attribute | Value |
    |---|---|
-   | `src` | `https://YOUR-GITHUB-USERNAME.github.io/REPO-NAME/` *(placeholder — the foreman will fill in the real URL after the first deploy)* |
+   | `src` | `https://ahandro1.github.io/p2p-mancala/play/` *(placeholder — the foreman will fill in the real URL after the first deploy)* |
    | `allow` | `fullscreen` |
    | `loading` | `lazy` |
    | `title` | `Mancala` |
@@ -46,7 +46,7 @@ on plan/settings. If the iframe doesn't survive publishing:
 1. Add a normal Webflow **Button** or **Link Block** with text like
    **"Play Mancala"**.
 2. Set its link to the same deployed URL
-   (`https://YOUR-GITHUB-USERNAME.github.io/REPO-NAME/`).
+   (`https://ahandro1.github.io/p2p-mancala/play/`).
 3. Set the link's **Open in new tab** option to **on**.
 4. Style it like any other Webflow button — this becomes the safety net so
    players can always reach the game even if the embed doesn't render
@@ -138,7 +138,7 @@ to this table before moving on — later steps assume these exact class names.
       state didn't survive conversion, re-create it manually as an
       Interaction/state on the class.
 - [ ] **Button links out correctly** — for now it points at the
-      placeholder `https://REPLACE-WITH-GAME-URL`; swap in the real
+      placeholder `https://ahandro1.github.io/p2p-mancala/play/`; swap in the real
       GitHub Pages URL once deployed, same as the iframe `src` in section 1.
 - [ ] **No stray elements** — HTMLtoFlow shouldn't have invented extra
       wrapper divs beyond normal Webflow structure; if it did, that's
