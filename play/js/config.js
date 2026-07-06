@@ -63,24 +63,21 @@ export const CONFIG = {
    * blocked by strict NATs/firewalls — essential for reliable play across
    * arbitrary home/mobile networks.
    */
+  /*
+   * NOTE (2026-07-06): the Open Relay Project static TURN endpoint
+   * (openrelay.metered.ca / openrelayproject:openrelayproject) is DEAD —
+   * the hostname no longer resolves (ICE error 701 on every attempt), so
+   * the dead entries were removed. STUN-only handles most home/wifi
+   * pairings; strict mobile-carrier CGNAT pairings need real TURN again.
+   * Free fix: create a free metered.ca account (no credit card), copy the
+   * TURN credentials from its dashboard, and add them back here as
+   * { urls, username, credential } entries.
+   */
   rtcConfig: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
     ],
   },
 
