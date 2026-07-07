@@ -24,7 +24,9 @@ import {
   initUI,
   renderBoard,
   animateEvents,
+  skipCurrentAnimation,
   setInteractive,
+  lockInteractivity,
   showChat,
   appendChat,
   renderMenu,
@@ -32,6 +34,7 @@ import {
   renderWaiting,
   updateWaitingStatus,
   updateWaitingElapsed,
+  showWaitingRetry,
   renderGameHud,
   renderGameOver,
   showResignConfirm,
@@ -128,6 +131,7 @@ function freshAppState() {
     name: '',
     opponentName: 'Opponent',
     gameId: null,
+    joinPassword: undefined,
     theme: null,
     disconnectToast: null,
     gameOverShown: false,
@@ -186,7 +190,112 @@ async function boot() {
   }
 
   initUI();
+  wirePageLifecycle();
   goToMenu();
+}
+
+// ---------------------------------------------------------------------------
+// Page lifecycle (Task 3: iOS Safari suspends timers + WebRTC when Safari is
+// backgrounded or the screen locks). We can't prevent that, but on RETURN to
+// visible we re-sync so the player isn't left staring at a silently-dead UI.
+//
+//   - In the lobby: the sweep/heartbeat timers were frozen while hidden, so the
+//     list may be stale (dead games lingering, or fresh ones missing). We tear
+//     the watch down and re-establish it, forcing a clean re-sync.
+//   - In a match/waiting session: if peers dropped while we were away (very
+//     common on iOS — the WebRTC connection is torn down on background), show
+//     the existing disconnect UI immediately instead of hanging silently.
+//
+// NOTE ON HOSTING FROM MOBILE: the announce heartbeat is a plain setInterval
+// (net.js announceGame) that keeps firing as long as the tab is foregrounded
+// and the screen is ON — nothing it depends on is killed by merely being the
+// active tab. A LOCKED phone, however, suspends JS timers + WebRTC entirely, so
+// hosting necessarily pauses while the screen is off; that is inherent to
+// mobile Safari and cannot be worked around from a web page. It resumes when
+// the phone is unlocked and this handler re-syncs.
+// ---------------------------------------------------------------------------
+
+/** Last observed match-room peer count, to detect drops across a background. */
+let lastKnownPeerCount = 0;
+
+/** True once the visibilitychange listener is installed (install once). */
+let lifecycleWired = false;
+
+function wirePageLifecycle() {
+  if (lifecycleWired) return;
+  lifecycleWired = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') {
+      // Going hidden: snapshot the peer count so we can detect a drop on return.
+      if (app.session && typeof app.session.getPeerCount === 'function') {
+        lastKnownPeerCount = app.session.getPeerCount();
+      }
+      return;
+    }
+    handleReturnToVisible();
+  });
+}
+
+/** Which screen is currently shown (by SCREEN_IDS suffix), or null. */
+function activeScreenId() {
+  for (const id of SCREEN_IDS) {
+    const el = document.getElementById(id);
+    if (el && !el.hidden) return id;
+  }
+  return null;
+}
+
+function handleReturnToVisible() {
+  const screen = activeScreenId();
+
+  // Lobby: force a clean re-sync of the (possibly stale) game list.
+  if (screen === 'screen-lobby' && app.lobby) {
+    teardownLobbyWatch();
+    app.unwatchLobbies = watchLobbies(app.lobby, (games) => {
+      const mapped = games.map((g) => ({
+        id: g.gameId,
+        hostName: g.hostName,
+        theme: g.theme,
+        hasPassword: g.hasPassword,
+        allowSpectators: g.allowSpectators,
+        status: g.status === 'playing' ? 'playing' : 'open',
+      }));
+      renderLobbyList(mapped, {
+        onJoin: handleJoinGame,
+        onWatch: handleWatchGame,
+        onBack: goToMenu,
+      });
+    });
+    return;
+  }
+
+  // In a session (game or still waiting): if a peer dropped while we were away,
+  // surface the disconnect UI now rather than leaving the player hanging.
+  if (app.session && typeof app.session.getPeerCount === 'function') {
+    const now = app.session.getPeerCount();
+    if (now < lastKnownPeerCount) {
+      if (enteredGame && !app.gameOverShown) {
+        // Mid-game: reuse the standard disconnect toast.
+        showDisconnectToast(
+          `${app.opponentName || 'Opponent'} may have disconnected — waiting for them to reconnect…`,
+        );
+      } else if (!enteredGame && activeScreenId() === 'screen-wait'
+                 && (app.role === 'player' || app.role === 'spectator')) {
+        // Guest/spectator still on the waiting screen: the host peer we were
+        // handshaking with is gone. Offer retry instead of an endless spinner.
+        // (A HOST waiting for an opponent has no host to retry against — its
+        //  own heartbeat resumes automatically, so we leave its screen as-is.)
+        stopWaitTelemetry();
+        clearJoinBoardTimer();
+        showWaitingRetry({
+          message: 'Lost the connection to the host while the app was in the background.',
+          onRetry: () => retryJoin(),
+          onBack: goToMenu,
+        });
+      }
+    }
+    lastKnownPeerCount = now;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +305,8 @@ async function boot() {
 /** Returns to the menu, tearing down any active session/lobby watch first. */
 function goToMenu() {
   stopWaitTelemetry();
+  clearJoinBoardTimer();
+  showWaitingRetry(null);
   teardownMatch();
   teardownLobbyWatch();
   app = freshAppState();
@@ -319,69 +430,60 @@ function teardownLobbyWatch() {
 }
 
 /**
+ * How long we wait for the host's board to arrive before surfacing the retry
+ * UI instead of hanging forever. Covers the whole guest handshake: WebRTC peer
+ * connect + 'hello' round-trip + first 'state'. 30s per the UX spec.
+ */
+const JOIN_BOARD_TIMEOUT_MS = 30000;
+
+/** @type {ReturnType<typeof setTimeout>|null} join-timeout handle. */
+let joinBoardTimer = null;
+
+function clearJoinBoardTimer() {
+  if (joinBoardTimer) {
+    clearTimeout(joinBoardTimer);
+    joinBoardTimer = null;
+  }
+}
+
+/**
  * @param {string} gameId
  * @param {string} [password]
  */
 async function handleJoinGame(gameId, password) {
-  const name = currentPlayerName();
-  const lobby = app.lobby || (await connectLobby());
-  app.lobby = lobby;
-
-  const result = await requestJoin(lobby, {
-    gameId,
-    role: 'player',
-    name,
-    password,
-  });
-
-  if (!result.accepted) {
-    alert(joinFailureMessage(result.reason));
-    return;
-  }
-
-  teardownLobbyWatch();
-  app.name = name;
-  app.gameId = gameId;
-  app.role = 'player';
-  app.myPlayer = 1;
-
-  showScreen('screen-wait');
-  renderWaiting({ role: 'player', statusText: 'Connecting to host…', onCancel: handleCancelWaiting });
-  startWaitTelemetry();
-
-  const session = await joinGameRoom({
-    gameId,
-    role: 'player',
-    name,
-    isHost: false,
-  });
-  app.session = session;
-  wireSessionCommon(session);
-
-  // The host's match-room peer is who we're connecting to; its join event
-  // fires as soon as the WebRTC connection is up, well before the slower
-  // 'hello'/'state' handshake completes.
-  const offWaitPeerJoin = session.onPeerJoin(() => {
-    updateWaitingStatus('Connected — waiting for the board…');
-    offWaitPeerJoin();
-  });
-
-  // The host pushes 'state' as soon as our hello arrives; onState (wired in
-  // wireSessionCommon) will call enterGameScreen() the first time it fires.
+  await joinFlow({ gameId, password, role: 'player', myPlayer: 1 });
 }
 
 /** @param {string} gameId */
 async function handleWatchGame(gameId) {
+  await joinFlow({ gameId, role: 'spectator', myPlayer: null });
+}
+
+/**
+ * Shared guest join/watch flow with clear lifecycle status + a hard timeout.
+ *
+ * Status line progression surfaced to the player on the waiting screen:
+ *   1. "Connecting to host…"            — request accepted, joining the room,
+ *                                          no match-room peer yet.
+ *   2. "Connected — waiting for the board…" — WebRTC peer is up (onPeerJoin),
+ *                                          waiting on the host's first 'state'.
+ *   3. (game screen)                    — first 'state' arrives; the queue's
+ *                                          enterGameScreen() takes over.
+ *
+ * If the board hasn't arrived within JOIN_BOARD_TIMEOUT_MS, we stop hanging and
+ * show a friendly retry panel ("Try again" / "Back"). Retry tears the session
+ * down cleanly (leaveGame() -> room.leave() -> roomCache.delete, so connectRoom
+ * can't hand back the stale dead room) and re-runs this same flow.
+ *
+ * @param {{gameId:string, password?:string, role:'player'|'spectator', myPlayer:0|1|null}} opts
+ */
+async function joinFlow(opts) {
+  const { gameId, password, role, myPlayer } = opts;
   const name = currentPlayerName();
   const lobby = app.lobby || (await connectLobby());
   app.lobby = lobby;
 
-  const result = await requestJoin(lobby, {
-    gameId,
-    role: 'spectator',
-    name,
-  });
-
+  const result = await requestJoin(lobby, { gameId, role, name, password });
   if (!result.accepted) {
     alert(joinFailureMessage(result.reason));
     return;
@@ -390,26 +492,59 @@ async function handleWatchGame(gameId) {
   teardownLobbyWatch();
   app.name = name;
   app.gameId = gameId;
-  app.role = 'spectator';
-  app.myPlayer = null;
+  app.role = role;
+  app.myPlayer = myPlayer;
+  app.joinPassword = password; // remembered so retry can re-run the same join
 
   showScreen('screen-wait');
-  renderWaiting({ role: 'spectator', statusText: 'Connecting to host…', onCancel: handleCancelWaiting });
+  renderWaiting({ role, statusText: 'Connecting to host…', onCancel: handleCancelWaiting });
   startWaitTelemetry();
 
-  const session = await joinGameRoom({
-    gameId,
-    role: 'spectator',
-    name,
-    isHost: false,
-  });
+  const session = await joinGameRoom({ gameId, role, name, isHost: false });
   app.session = session;
   wireSessionCommon(session);
 
+  // WebRTC peer is up (fires before the slower 'hello'/'state' handshake).
   const offWaitPeerJoin = session.onPeerJoin(() => {
     updateWaitingStatus('Connected — waiting for the board…');
     offWaitPeerJoin();
   });
+
+  // Hard timeout: if no board (first onState -> enterGameScreen) lands in time,
+  // surface retry instead of hanging. enterGameScreen() clears this timer.
+  clearJoinBoardTimer();
+  joinBoardTimer = setTimeout(() => {
+    if (enteredGame) return; // board already arrived
+    stopWaitTelemetry();
+    showWaitingRetry({
+      message: "Couldn't reach the host. They may have left, or the connection is blocked.",
+      onRetry: () => retryJoin(),
+      onBack: goToMenu,
+    });
+  }, JOIN_BOARD_TIMEOUT_MS);
+}
+
+/**
+ * Retries a timed-out guest join. Tears down the dead session/room first (so
+ * net.js's roomCache doesn't return the stale room on rejoin), clears the
+ * retry UI, and re-runs joinFlow with the same parameters.
+ */
+async function retryJoin() {
+  const gameId = app.gameId;
+  const role = app.role === 'spectator' ? 'spectator' : 'player';
+  const myPlayer = app.role === 'spectator' ? null : 1;
+  const password = app.joinPassword;
+  if (!gameId) { goToMenu(); return; }
+
+  clearJoinBoardTimer();
+  showWaitingRetry(null);
+  // Clean teardown: leaveGame() -> room.leave() -> roomCache.delete(gameId),
+  // guaranteeing connectRoom() builds a FRESH room on the retry rather than
+  // reusing the cached (now-dead) one.
+  teardownMatch();
+  enteredGame = false;
+
+  await joinFlow({ gameId, password, role, myPlayer });
 }
 
 /** @param {string|undefined} reason */
@@ -451,6 +586,7 @@ function wireSessionCommon(session) {
   enteredGame = false;
   app.gameOverShown = false;
   app.rematchState = { selfWantsRematch: false, peerWantsRematch: false };
+  resetStateQueue();
 
   session.onState((data) => {
     handleIncomingState(data);
@@ -485,6 +621,19 @@ function wireSessionCommon(session) {
       // A reconnecting player clears any disconnect toast.
       hideDisconnectToast();
     }
+    // Keep the visibilitychange baseline fresh so a later background/return
+    // correctly detects a genuine drop rather than false-positiving.
+    if (typeof session.getPeerCount === 'function') {
+      lastKnownPeerCount = session.getPeerCount();
+    }
+  });
+
+  // Track live peer count so the page-lifecycle handler can detect a drop that
+  // happened while the app was backgrounded.
+  session.onPeerJoin(() => {
+    if (typeof session.getPeerCount === 'function') {
+      lastKnownPeerCount = session.getPeerCount();
+    }
   });
 
   session.onRematch(() => {
@@ -493,9 +642,112 @@ function wireSessionCommon(session) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Serial, loss-proof incoming-state queue (Task 1: rapid-move race)
+//
+// ROOT CAUSE of the bug: handleIncomingState() used to call animateEvents()
+// directly for every 'state' that arrived. animateEvents() is async, and
+// nothing serialized the calls — so when a player took two moves fast (or an
+// extra-turn chain landed two authoritative states close together), a second
+// 'state' could arrive MID-ANIMATION and kick off a SECOND animateEvents()
+// concurrently. The two share ui.js module globals (currentState, animating,
+// skipToEnd, the travelling sow pile), so they corrupt each other and the
+// board can end up out of sync with the engine's real output.
+//
+// FIX: funnel every incoming state through ONE queue drained serially. We
+// never run two animations at once, we never drop the final authoritative
+// state, and if states stack up we fast-forward the current animation, snap
+// to the intermediate state instantly, and animate only the LATEST one.
+//
+// Ordering: states carry a monotonically increasing `seq` from net.js. We
+// ignore any state whose seq is <= the last one we've already applied (stale /
+// duplicate), and keep the queue seq-sorted so out-of-order delivery is
+// corrected before we render.
+// ---------------------------------------------------------------------------
+
+/** @type {any[]} pending authoritative states awaiting serial processing. */
+let stateQueue = [];
+/** Highest seq we've already applied to the board (drops stale/duplicate states). */
+let lastAppliedSeq = -Infinity;
+
+/** True while an animateEvents() call is in flight (guards against overlap). */
+let animationInFlight = false;
+
 function handleIncomingState(data) {
+  if (!data) return;
+  // Drop stale/duplicate states by seq. Initial-sync states from net.js carry
+  // a seq too; only strictly-newer states are worth queueing.
+  if (typeof data.seq === 'number' && data.seq <= lastAppliedSeq) return;
+  stateQueue.push(data);
+  // Keep seq-ordered (states without a seq keep insertion order, sorted last).
+  stateQueue.sort((a, b) => {
+    const sa = typeof a.seq === 'number' ? a.seq : Number.MAX_SAFE_INTEGER;
+    const sb = typeof b.seq === 'number' ? b.seq : Number.MAX_SAFE_INTEGER;
+    return sa - sb;
+  });
+
+  // If a state landed while an animation is running, cut that animation short
+  // so the queue advances to the newer state promptly. skipCurrentAnimation()
+  // synchronously fires the running animation's onDone, which re-enters
+  // drainStateQueue() — hence the re-entrancy guard inside it.
+  if (animationInFlight) {
+    skipCurrentAnimation();
+    return;
+  }
+  drainStateQueue();
+}
+
+/**
+ * Drains the queue, never overlapping animations. Re-entrancy-safe: the ONLY
+ * place an animation is kicked off is here, guarded by `animationInFlight`; the
+ * animation's onDone re-enters this function to pull the next state. Between
+ * states we snap (no animation) any that already have a newer state queued
+ * behind them — so a burst collapses to "snap the intermediates, animate only
+ * the newest" without ever running two animations at once.
+ *
+ * The loop runs synchronously through every snap-able (intermediate) state,
+ * then either animates the final state (returning; onDone re-enters) or stops.
+ */
+function drainStateQueue() {
+  if (animationInFlight) return; // an animation owns the drain; it will re-enter
+
+  while (stateQueue.length > 0) {
+    const data = stateQueue[0];
+
+    const isIntermediate = stateQueue.length > 1;
+    const hasEvents = data.lastMoveEvents && data.lastMoveEvents.length > 0;
+    const animate = hasEvents && !isIntermediate;
+
+    // Commit this state now (before rendering) so re-entrant pushes see the
+    // updated lastAppliedSeq and the queue head is consistent.
+    stateQueue.shift();
+    if (typeof data.seq === 'number') lastAppliedSeq = data.seq;
+
+    if (animate) {
+      animationInFlight = true;
+      applyStateToScreens(data, () => {
+        animationInFlight = false;
+        // Continue draining whatever arrived while we animated.
+        drainStateQueue();
+      }, true);
+      return; // yield to the animation; onDone re-enters
+    }
+
+    // Snap this intermediate/eventless state instantly and keep looping.
+    applyStateToScreens(data, null, false);
+  }
+}
+
+/**
+ * Renders one authoritative state onto every screen, optionally animating the
+ * move that produced it. `animate` selects animated vs. instant application.
+ * @param {any} data - the authoritative state payload from net.js
+ * @param {() => void} onAnimationDone - called after the animation finishes
+ *   (only when animate === true)
+ * @param {boolean} animate
+ */
+function applyStateToScreens(data, onAnimationDone, animate) {
   const state = data.board;
-  const isInitialSync = !data.lastMoveEvents || data.lastMoveEvents.length === 0;
 
   if (!enteredGame) {
     enteredGame = true;
@@ -522,17 +774,30 @@ function handleIncomingState(data) {
     }
   };
 
-  if (isInitialSync) {
-    afterRender();
-  } else {
+  if (animate) {
     animateEvents(data.lastMoveEvents, {
-      onDone: afterRender,
+      onDone: () => {
+        afterRender();
+        if (typeof onAnimationDone === 'function') onAnimationDone();
+      },
     });
+  } else {
+    // Snap: render instantly, no animation.
+    afterRender();
   }
+}
+
+/** Reset the state queue on every new session/match (called from wireSessionCommon). */
+function resetStateQueue() {
+  stateQueue = [];
+  animationInFlight = false;
+  lastAppliedSeq = -Infinity;
 }
 
 function enterGameScreen() {
   stopWaitTelemetry();
+  clearJoinBoardTimer();
+  showWaitingRetry(null);
   showScreen('screen-game');
   showChat({
     messages: [],

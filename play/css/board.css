@@ -15,7 +15,10 @@
   flex-direction: column;
   gap: 0.5rem;
   background: var(--panel-bg, #14151a);
+  /* dvh so the board stage fills the true visible height on iOS Safari (the
+     vh fallback is for browsers without dvh). See base.css note. */
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
 }
 
@@ -193,22 +196,28 @@
    Columns: [P2 store] [6 pit columns] [P1 store]
    Rows:    top = P2 pits (12..7), bottom = P1 pits (0..5).
 
-   FIXED design geometry: 900x500 CSS px. All internal metrics are absolute
-   px (no vw/clamp) so nothing reflows — the whole board is scaled as a unit
-   by transform. --board-scale defaults to 1 (unscaled) until ui.js measures. */
+   FIXED design geometry: 1000x380 CSS px (classic wide mancala aspect ratio).
+   All internal metrics are absolute px (no vw/clamp) so nothing reflows — the
+   whole board is scaled as a unit by transform. --board-scale defaults to 1
+   (unscaled) until ui.js measures. Must match BOARD_DESIGN.horizontal in ui.js. */
 .board {
   --board-scale: 1;
   --stone-size: 24px;
   position: relative;
   display: grid;
-  grid-template-columns: 1.15fr repeat(6, 1fr) 1.15fr;
+  /* Classic mancala proportions (Club Penguin reference): two TIGHT rows of 6
+     circular pits with slim elongated end stores. The design box is WIDE and
+     relatively SHORT so each pit cell is near-square — that keeps the pits
+     round while eliminating the tall vertical dead-space that made the old
+     900x500 box look stretched. Store columns are slim (0.82fr). */
+  grid-template-columns: 0.82fr repeat(6, 1fr) 0.82fr;
   grid-template-rows: 1fr 1fr;
-  gap: 14px;
-  width: 900px;
-  height: 500px;
+  gap: 16px 20px;
+  width: 1000px;
+  height: 380px;
   flex: 0 0 auto;
-  padding: 22px;
-  border-radius: 32px;
+  padding: 24px;
+  border-radius: 34px;
   background: var(--board-bg, #6b4a2f);
   border: 7px solid var(--board-edge, #4a3220);
   box-shadow:
@@ -647,10 +656,10 @@
   }
   .chat-panel {
     border-radius: 16px 16px 0 0;
-    max-height: 55vh;
+    max-height: 55dvh;
     transform: translateY(0);
   }
-  .chat-log { max-height: 38vh; }
+  .chat-log { max-height: 38dvh; }
 }
 
 /* Desktop: side panel docked right. */

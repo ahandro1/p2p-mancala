@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task 1 — rapid-move race harness</title>
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/board.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <style>
+    body { padding: 1rem; }
+    #results { font-family: monospace; white-space: pre-wrap; }
+    .pass { color: #3ecf8e; }
+    .fail { color: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <!-- Minimal game-screen shell so ui.js can find #board / #game-hud. -->
+  <section id="screen-game" class="screen screen--game">
+    <div class="game-hud" id="game-hud">
+      <span class="hud-name" id="hud-name-0">P1</span>
+      <span class="hud-score" id="hud-score-0">0</span>
+      <span class="turn-indicator" id="turn-indicator"></span>
+      <span class="hud-name" id="hud-name-1">P2</span>
+      <span class="hud-score" id="hud-score-1">0</span>
+    </div>
+    <div class="board-stage">
+      <div id="board" class="board" data-board-theme="arcade" data-stone-theme="candy"></div>
+    </div>
+  </section>
+  <pre id="results">running…</pre>
+
+  <script type="module">
+    import * as engine from '../js/engine.js';
+    import {
+      initUI, renderBoard, animateEvents, skipCurrentAnimation, setInteractive,
+    } from '../js/ui.js';
+
+    const out = document.getElementById('results');
+    const log = [];
+    let failures = 0;
+    function record(name, ok, detail) {
+      log.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
+      if (!ok) failures++;
+      out.innerHTML = log.map((l) =>
+        `<span class="${l.startsWith('PASS') ? 'pass' : 'fail'}">${l}</span>`).join('\n');
+    }
+
+    /** Read the 14 pit counts straight out of the DOM badges. */
+    function domCounts() {
+      const counts = new Array(14).fill(0);
+      for (let i = 0; i < 14; i++) {
+        const el = document.querySelector(
+          (i === 6 || i === 13) ? `.store[data-pit="${i}"] .store-count`
+                                : `.pit[data-pit="${i}"] .pit-count`);
+        counts[i] = el ? Number(el.textContent) : NaN;
+      }
+      return counts;
+    }
+    const eq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Resolve once the queue is fully drained AND no animation is in flight, so
+    // assertions don't race a still-running animation on a slow renderer.
+    const idle = async (maxMs = 12000) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < maxMs) {
+        if (!animationInFlight && stateQueue.length === 0) {
+          // Require the queue to STAY idle across two spaced checks so we don't
+          // measure during the brief gap between one animation's onDone and the
+          // next drain, and settle past any trailing extra-turn splash.
+          await wait(400);
+          if (!animationInFlight && stateQueue.length === 0) {
+            await wait(400);
+            if (!animationInFlight && stateQueue.length === 0) return;
+          }
+        }
+        await wait(50);
+      }
+    };
+
+    // ---- Replicate main.js's serial queue against real ui.js + engine ------
+    // (Same algorithm as main.js drainStateQueue: never overlap animations,
+    //  snap intermediates, animate only the latest, never drop the final.)
+    let stateQueue = [];
+    let animationInFlight = false;
+    let lastSeq = -Infinity;
+
+    function onState(data) {
+      if (typeof data.seq === 'number' && data.seq <= lastSeq) return;
+      stateQueue.push(data);
+      stateQueue.sort((a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER));
+      if (animationInFlight) { skipCurrentAnimation(); return; }
+      drain();
+    }
+    function drain() {
+      if (animationInFlight) return;
+      while (stateQueue.length > 0) {
+        const data = stateQueue[0];
+        const isIntermediate = stateQueue.length > 1;
+        const hasEvents = data.lastMoveEvents && data.lastMoveEvents.length > 0;
+        const animate = hasEvents && !isIntermediate;
+        stateQueue.shift();
+        if (typeof data.seq === 'number') lastSeq = data.seq;
+        if (animate) {
+          animationInFlight = true;
+          renderThen(data, () => { animationInFlight = false; drain(); }, true);
+          return;
+        }
+        renderThen(data, null, false);
+      }
+    }
+    function renderThen(data, done, animate) {
+      const after = () => { renderBoard(data.board); };
+      if (animate) {
+        animateEvents(data.lastMoveEvents, { onDone: () => { after(); if (done) done(); } });
+      } else {
+        after();
+      }
+    }
+
+    /** A tiny host: applies a move via engine, bumps seq, feeds onState. */
+    function makeHost(initial) {
+      let cur = initial;
+      let seq = 0;
+      // Reset queue state for a clean test, prime the board with initial state.
+      stateQueue = []; animationInFlight = false; lastSeq = 0;
+      renderBoard(cur);
+      return {
+        state: () => cur,
+        move(pit) {
+          const res = engine.applyMove(cur, pit);
+          cur = res.state;
+          seq += 1;
+          onState({ board: cur, currentPlayer: cur.currentPlayer, lastMoveEvents: res.events, seq });
+          return res;
+        },
+      };
+    }
+
+    async function run() {
+      initUI();
+
+      // === TEST A: two moves back-to-back, 2nd issued mid-animation ==========
+      {
+        // Start from a fresh game. P1 plays pit 0 (turn passes to P2), then
+        // P2 plays pit 7 immediately while P1's animation is still running.
+        let cur = engine.newGame();
+        const host = makeHost(cur);
+        // Compute the true engine end-state of the two moves.
+        const r1 = engine.applyMove(cur, 0);
+        const r2 = engine.applyMove(r1.state, 7); // P2's pit
+        const expected = r2.state.pits;
+
+        host.move(0);            // starts animating
+        await wait(120);         // let the first animation get going
+        host.move(7);            // second move mid-animation -> queue + skip
+
+        await idle();            // wait until the queue fully drains
+
+        const dom = domCounts();
+        record('A: two fast moves -> DOM equals engine output',
+          eq(dom, expected), `dom=[${dom}] expected=[${expected}]`);
+      }
+
+      // === TEST B: extra-turn chain ==========================================
+      {
+        // Craft a state where P1 pit 2 has exactly enough to land in own store
+        // (extra turn), then P1 moves again. Fresh game: pit 2 has 4 stones,
+        // lands 3,4,5,6(store) -> extra turn. Then P1 plays pit 0.
+        let cur = engine.newGame();
+        const host = makeHost(cur);
+        const r1 = engine.applyMove(cur, 2);      // extra turn (lands in store)
+        const r2 = engine.applyMove(r1.state, 0); // same player again
+        const expected = r2.state.pits;
+
+        host.move(2);            // extra-turn move animates
+        await wait(60);
+        host.move(0);            // chained move, mid-animation
+        await idle();
+
+        const dom = domCounts();
+        record('B: extra-turn chain -> DOM equals engine output',
+          eq(dom, expected), `dom=[${dom}] expected=[${expected}]`);
+      }
+
+      // === TEST C: burst of 3 states, only latest need animate, none dropped ==
+      {
+        let cur = engine.newGame();
+        const host = makeHost(cur);
+        const r1 = engine.applyMove(cur, 0);
+        const r2 = engine.applyMove(r1.state, 7);
+        const r3 = engine.applyMove(r2.state, 1);
+        const expected = r3.state.pits;
+
+        // Fire all three within one animation frame window.
+        host.move(0); host.move(7); host.move(1);
+        await idle();
+
+        const dom = domCounts();
+        record('C: 3-state burst -> DOM equals final engine output (nothing dropped)',
+          eq(dom, expected), `dom=[${dom}] expected=[${expected}]`);
+      }
+
+      out.dataset.done = '1';
+      out.dataset.failures = String(failures);
+      window.__RACE_RESULTS__ = { failures, log };
+    }
+
+    run();
+  </script>
+</body>
+</html>

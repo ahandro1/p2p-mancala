@@ -81,8 +81,29 @@ let chatUnread = 0;
 /** True while an animation sequence is running (enables tap-to-skip). */
 let animating = false;
 
+/**
+ * Hard interactivity lock. Independent of `animating`: it's raised the instant
+ * a move is TAPPED (before any state/animation has arrived over the network)
+ * and lowered only when the resulting animation completes via onDone ->
+ * setInteractive. This closes the rapid-move race where a second tap could
+ * fire in the network gap between sendMove() and the animation actually
+ * starting, while `animating` was still false. See lockInteractivity().
+ */
+let interactivityLocked = false;
+
 /** Set by animateEvents; calling it fast-forwards to the final state. */
 let skipToEnd = null;
+
+/**
+ * Monotonic animation generation. Bumped on every animateEvents() call. Each
+ * runSequence() captures the generation it belongs to and bails the instant a
+ * newer animation supersedes it — this is what makes back-to-back animations
+ * safe: when main.js's queue skips the current animation and immediately starts
+ * the next, the OLD runSequence (which may still be suspended at an `await
+ * wait()`) resumes to find its generation stale and returns WITHOUT touching
+ * the DOM, so it can't interleave with / corrupt the new animation.
+ */
+let animGeneration = 0;
 
 /**
  * The travelling sow pile element (a small stone cluster), while a sow is in
@@ -207,11 +228,25 @@ function applyStoredTheme() {
   setTheme(theme);
 }
 
-/** Tapping the board during animation skips to the final state. */
+/**
+ * Tapping the board OUTSIDE any pit/store during an animation skips it to the
+ * final state. We deliberately ignore taps that land on a pit or store (or
+ * their children) so a "skip" gesture can never be confused with a move tap:
+ * a player who taps a legal pit is making a MOVE, not asking to skip. Only the
+ * board's empty frame area triggers a skip. (During animation pits are locked
+ * non-interactive anyway — see setInteractive/isInteractive — so this is a
+ * belt-and-suspenders separation of the two gestures.)
+ */
 function wireSkipTap() {
   if (!dom.board || dom.board.dataset.skipWired) return;
   dom.board.dataset.skipWired = '1';
-  const skip = () => { if (animating && skipToEnd) skipToEnd(); };
+  const skip = (ev) => {
+    if (!animating || !skipToEnd) return;
+    // Ignore taps on a pit/store (or anything inside one): those are the
+    // move-affordance region, never the skip region.
+    if (ev.target && ev.target.closest && ev.target.closest('.pit, .store')) return;
+    skipToEnd();
+  };
   dom.board.addEventListener('click', skip);
   dom.board.addEventListener('touchstart', skip, { passive: true });
 }
@@ -358,7 +393,7 @@ function renderHudTurn(currentPlayer) {
 
 /** Design pixel dimensions of each layout (must match board.css). */
 const BOARD_DESIGN = {
-  horizontal: { w: 900, h: 500 },
+  horizontal: { w: 1000, h: 380 },
   vertical: { w: 460, h: 820 },
 };
 
@@ -453,6 +488,10 @@ export function animateEvents(events, opts = {}) {
   //  integration passes the real next state to renderBoard afterwards. For the
   //  standalone animation we only need the counts to be correct on skip.)
 
+  // This animation's generation. Any previously-running runSequence is now
+  // stale and will self-abort on its next loop check / await resume.
+  const myGen = ++animGeneration;
+
   return new Promise((resolve) => {
     animating = true;
     let done = false;
@@ -460,8 +499,13 @@ export function animateEvents(events, opts = {}) {
     const finish = () => {
       if (done) return;
       done = true;
-      animating = false;
-      skipToEnd = null;
+      // Only clear the shared "animating"/skip state if WE are still the
+      // current generation. A superseded finish (old animation skipped after a
+      // newer one already started) must not clobber the live animation's flags.
+      if (myGen === animGeneration) {
+        animating = false;
+        skipToEnd = null;
+      }
       flushWaits();
       removeSowPile();
       // Snap to authoritative final counts.
@@ -481,8 +525,22 @@ export function animateEvents(events, opts = {}) {
       return;
     }
 
-    runSequence(events, hop, finish).catch(() => finish());
+    runSequence(events, hop, finish, myGen).catch(() => finish());
   });
+}
+
+/**
+ * Fast-forwards any in-flight animation to its end IMMEDIATELY (synchronously
+ * snapping the board to that animation's authoritative final counts and firing
+ * its onDone). No-op when nothing is animating. Used by main.js's serial state
+ * queue: when newer authoritative states have stacked up behind the one being
+ * animated, we skip the current animation, let its onDone run (which renders
+ * the intermediate board), and then animate only the LATEST state — so a burst
+ * of moves never runs two animations at once and never drops the final state.
+ * @returns {void}
+ */
+export function skipCurrentAnimation() {
+  if (animating && typeof skipToEnd === 'function') skipToEnd();
 }
 
 /**
@@ -526,15 +584,22 @@ function applyEventsToCounts(counts, events) {
  * out of it (settle bounce + badge bump), the pile visually shrinking as it
  * goes. Store deposits, captures, sweeps and the extra-turn splash follow.
  *
- * Bails immediately if a skip was requested (animating flips false); finish()
- * then snaps the board to the authoritative counts.
+ * Bails immediately if a skip was requested (animating flips false) OR if a
+ * newer animation superseded this one (generation mismatch); finish() then
+ * snaps the board to the authoritative counts. The generation check is what
+ * prevents a suspended-at-await old sequence from resuming and corrupting a
+ * newer animation's DOM (the rapid-move race).
  * @param {import('./engine.js').GameEvent[]} events
  * @param {number} hop - per-hop duration (ms)
  * @param {() => void} finish
+ * @param {number} myGen - the animation generation this sequence belongs to
  */
-async function runSequence(events, hop, finish) {
+async function runSequence(events, hop, finish, myGen) {
   const live = currentState ? currentState.pits.slice() : new Array(14).fill(0);
   measurePitCenters(); // one measurement pass for the whole animation
+
+  /** True once this sequence has been skipped or superseded — stop mutating. */
+  const stale = () => !animating || myGen !== animGeneration;
 
   /** Number of stones currently riding in the travelling pile. */
   let pileCount = 0;
@@ -542,7 +607,7 @@ async function runSequence(events, hop, finish) {
   let pileAt = -1;
 
   for (const e of events) {
-    if (!animating) return; // skipped -> finish() snaps to final
+    if (stale()) return; // skipped or superseded -> finish() snaps to final
 
     switch (e.type) {
       case 'pickup': {
@@ -561,7 +626,7 @@ async function runSequence(events, hop, finish) {
         // Hop the pile from its current pit to this one, then drop a stone.
         movePileTo(e.pit);
         await wait(hop);
-        if (!animating) return;
+        if (stale()) return;
         pileAt = e.pit;
         live[e.pit] += 1;
         pileCount = Math.max(0, pileCount - 1);
@@ -580,7 +645,7 @@ async function runSequence(events, hop, finish) {
         sweepStonesToStore(e.pit, e.store);
         sweepStonesToStore(e.oppositePit, e.store);
         await wait(CAPTURE_MS * 0.6);
-        if (!animating) return;
+        if (stale()) return;
         live[e.pit] = 0;
         live[e.oppositePit] = 0;
         live[e.store] += total;
@@ -604,7 +669,7 @@ async function runSequence(events, hop, finish) {
           sweepStonesToStore(p, e.store);
         }
         await wait(SWEEP_MS * 0.5);
-        if (!animating) return;
+        if (stale()) return;
         let total = 0;
         for (const p of e.pits) { total += live[p]; live[p] = 0; setCount(p, 0); clearStones(p); }
         live[e.store] += total;
@@ -620,6 +685,7 @@ async function runSequence(events, hop, finish) {
         break;
     }
   }
+  if (stale()) return; // superseded at the tail — don't double-finish
   removeSowPile();
   finish();
 }
@@ -826,18 +892,56 @@ function sweepStonesToStore(fromPit, store) {
 export function setInteractive(legalPits, onPitTap) {
   if (!dom.board) dom.board = $('board');
   if (!dom.board) return;
+  // Any explicit (re-)wire of interactivity clears the hard lock: this is the
+  // single point where interactivity is re-enabled (onDone -> setInteractive),
+  // so it must drop the lock raised when the move was tapped.
+  interactivityLocked = false;
   const legal = new Set(legalPits || []);
 
   for (const el of dom.board.querySelectorAll('.pit')) {
     const idx = Number(el.dataset.pit);
     el.classList.toggle('pit--legal', legal.has(idx));
-    // Replace handler cleanly by cloning dataset-tracked listeners.
+    // Replace handler cleanly by cloning dataset-tracked listeners. The handler
+    // guards on BOTH animating and the hard lock so a tap fired in the
+    // network gap between sendMove() and the animation starting is dropped.
     el.onclick = legal.has(idx)
-      ? () => { if (!animating && typeof onPitTap === 'function') onPitTap(idx); }
+      ? () => {
+          if (animating || interactivityLocked) return;
+          if (typeof onPitTap !== 'function') return;
+          // Raise the lock the instant a move is tapped; the very next line's
+          // onPitTap() sends the move. Interactivity re-opens only when the
+          // resulting animation's onDone calls setInteractive() again.
+          lockInteractivity();
+          onPitTap(idx);
+        }
       : null;
     el.setAttribute('role', legal.has(idx) ? 'button' : 'presentation');
     if (legal.has(idx)) el.tabIndex = 0; else el.removeAttribute('tabindex');
   }
+}
+
+/**
+ * Raises the hard interactivity lock and visually clears the legal-pit
+ * highlight so no pit looks tappable. Called the instant a move is tapped (see
+ * setInteractive) and available to callers (main.js) that need to lock input
+ * before a move round-trips. Idempotent.
+ * @returns {void}
+ */
+export function lockInteractivity() {
+  interactivityLocked = true;
+  if (!dom.board) dom.board = $('board');
+  if (!dom.board) return;
+  for (const el of dom.board.querySelectorAll('.pit')) {
+    el.classList.remove('pit--legal');
+    el.onclick = null;
+    el.removeAttribute('tabindex');
+    el.setAttribute('role', 'presentation');
+  }
+}
+
+/** @returns {boolean} true while an animation sequence is playing. */
+export function isAnimating() {
+  return animating;
 }
 
 /* ==========================================================================
@@ -1181,11 +1285,13 @@ export function renderWaiting({ role = 'host', statusText = 'Getting things read
   if (heading) {
     heading.textContent = role === 'host' ? 'Waiting for an opponent…' : 'Joining game…';
   }
+  // Clear any leftover retry panel from a prior failed attempt on re-entry.
+  showWaitingRetry(null);
   updateWaitingStatus(statusText);
   const elapsed = $('wait-elapsed');
   if (elapsed) { elapsed.hidden = true; elapsed.textContent = ''; }
   const cancel = $('wait-cancel');
-  if (cancel) cancel.onclick = () => onCancel && onCancel();
+  if (cancel) { cancel.hidden = false; cancel.onclick = () => onCancel && onCancel(); }
 }
 
 /**
@@ -1198,6 +1304,65 @@ export function renderWaiting({ role = 'host', statusText = 'Getting things read
 export function updateWaitingStatus(text) {
   const statusEl = $('wait-status-text');
   if (statusEl) statusEl.textContent = text;
+}
+
+/**
+ * Shows a friendly "couldn't connect" retry panel ON the waiting screen, in
+ * place of the spinner/status, with "Try again" and "Back" actions. Used by
+ * main.js when the guest join handshake times out (30s) instead of hanging
+ * forever. Pass null to hide the panel and restore the normal waiting UI.
+ * @param {{message?:string, onRetry?:()=>void, onBack?:()=>void}|null} opts
+ * @returns {void}
+ */
+export function showWaitingRetry(opts) {
+  const card = $('wait-heading') && $('wait-heading').closest('.wait-card');
+  const dots = card && card.querySelector('.wait-dots');
+  const status = card && card.querySelector('.wait-status');
+  const elapsed = $('wait-elapsed');
+  const cancel = $('wait-cancel');
+  let retry = $('wait-retry');
+
+  if (!opts) {
+    // Restore normal waiting UI.
+    if (retry) retry.hidden = true;
+    if (dots) dots.hidden = false;
+    if (status) status.hidden = false;
+    if (cancel) cancel.hidden = false;
+    return;
+  }
+
+  const { message = "Couldn't reach the host.", onRetry, onBack } = opts;
+
+  // Hide the "still working" affordances; the connection has given up.
+  if (dots) dots.hidden = true;
+  if (status) status.hidden = true;
+  if (elapsed) { elapsed.hidden = true; elapsed.textContent = ''; }
+  if (cancel) cancel.hidden = true;
+
+  const heading = $('wait-heading');
+  if (heading) heading.textContent = 'Connection trouble';
+
+  if (!retry && card) {
+    retry = document.createElement('div');
+    retry.id = 'wait-retry';
+    retry.className = 'wait-retry';
+    retry.innerHTML =
+      `<p class="wait-retry-msg"></p>
+       <div class="wait-retry-actions">
+         <button type="button" class="btn btn--primary" data-act="retry">Try again</button>
+         <button type="button" class="btn btn--secondary" data-act="back">Back</button>
+       </div>`;
+    card.appendChild(retry);
+  }
+  if (retry) {
+    retry.hidden = false;
+    const msgEl = retry.querySelector('.wait-retry-msg');
+    if (msgEl) msgEl.textContent = message;
+    const retryBtn = retry.querySelector('[data-act="retry"]');
+    const backBtn = retry.querySelector('[data-act="back"]');
+    if (retryBtn) retryBtn.onclick = () => { if (typeof onRetry === 'function') onRetry(); };
+    if (backBtn) backBtn.onclick = () => { if (typeof onBack === 'function') onBack(); };
+  }
 }
 
 /**

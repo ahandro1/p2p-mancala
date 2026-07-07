@@ -77,6 +77,21 @@ button {
   cursor: pointer;
 }
 
+/* iOS Safari touch hardening:
+   - touch-action: manipulation disables the 300ms double-tap-to-zoom delay on
+     taps, so board pits + buttons feel instant and a fast double-tap can't zoom
+     the page mid-game.
+   - -webkit-tap-highlight-color transparent removes the grey flash iOS paints
+     over tapped elements (we provide our own :active affordances). */
+button,
+input,
+.pit,
+.store,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -94,12 +109,20 @@ button {
    attribute. Native [hidden] already applies display:none, this rule just
    defines the *visible* layout for whichever screen is shown. */
 
+/* iOS Safari: 100vh overcounts by the collapsing URL-bar height, which pushes
+   the board/board-stage taller than the visible viewport and causes the whole
+   screen to feel "off". dvh (dynamic viewport height) tracks the *actual*
+   visible area as the URL bar shows/hides. vh stays as the fallback for
+   browsers without dvh support (progressive enhancement — the dvh line simply
+   overrides it where supported). */
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .screen {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1rem;
 }
 
@@ -274,42 +297,102 @@ button {
    Added in Phase 4. Diag styles above are untouched.
    ========================================================================== */
 
-/* Screens that center a single card. */
+/* ==========================================================================
+   ARCADE 2000s FLASH-GAME SKIN for the menu / lobby / wait / over screens
+   (Task 4). Club Penguin / flash-game direction: azure→royal-blue backdrop,
+   chunky glossy white-framed panels with a subtle radial burst, big bold
+   outlined italic title, oversized glossy rounded buttons. Pure CSS — no
+   images. Palette mirrors docs/default-skin-reference.md + themes.css arcade.
+   ========================================================================== */
+
+/* Shared arcade palette (kept local so these screens don't depend on #board's
+   theme attribute being present). */
+.screen--centered,
+#screen-lobby {
+  --arc-sky-1: #34c0f4;
+  --arc-sky-2: #0f9ee8;
+  --arc-sky-3: #0b5fb0;
+  --arc-gold-1: #ffe27a;
+  --arc-gold-2: #f8c200;
+  --arc-gold-3: #d98e00;
+  --arc-gold-edge: #a86400;
+  --arc-navy: #0a2e5c;
+  --arc-frame: #ffffff;
+  --arc-frame-edge: #0a4f96;
+}
+
+/* Screens that center a single card — now over an azure→royal arcade sky. */
 .screen--centered {
   display: flex;
   align-items: center;
   justify-content: center;
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255, 255, 255, 0.25), transparent 60%),
+    linear-gradient(180deg, var(--arc-sky-1) 0%, var(--arc-sky-2) 45%, var(--arc-sky-3) 100%);
 }
 
-/* Arcade-ish panel used by menu/lobby/wait/over cards. */
+/* Chunky glossy arcade panel used by menu/lobby/wait/over cards. Thick pale
+   frame + navy outer edge, big rounded corners, inner top highlight, and a
+   faint radial burst behind the content for that flash-game sheen. */
 .panel {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
-  padding: 1.25rem;
+  position: relative;
+  background:
+    radial-gradient(90% 70% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 60%),
+    linear-gradient(180deg, #1f2634 0%, #171c28 100%);
+  border: 4px solid var(--arc-frame);
+  outline: 3px solid var(--arc-frame-edge);
+  border-radius: 22px;
+  box-shadow:
+    0 10px 0 rgba(4, 30, 60, 0.45),
+    0 18px 36px rgba(0, 0, 0, 0.45),
+    inset 0 3px 0 rgba(255, 255, 255, 0.18);
+  padding: 1.4rem 1.25rem 1.25rem;
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
 }
+
+/* Subtle diagonal candy-stripe wash on the menu panel only (behind content). */
+.menu-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.05) 0 14px,
+    rgba(255, 255, 255, 0) 14px 28px);
+}
+.menu-card > * { position: relative; z-index: 1; }
 
 .app-title {
   font-family: "Lilita One", system-ui, sans-serif;
-  font-size: clamp(2.2rem, 10vw, 3rem);
+  font-size: clamp(2.6rem, 13vw, 3.6rem);
   text-align: center;
-  color: #ffd54a;
-  text-shadow: 0 3px 0 #0a2e5c, 0 0 12px rgba(0, 0, 0, 0.4);
-  transform: skewX(-6deg);
-  margin: 0;
+  color: var(--arc-gold-2);
+  letter-spacing: 0.5px;
+  /* Bold outlined italic look: navy stroke + stacked drop shadow for depth. */
+  -webkit-text-stroke: 2px var(--arc-navy);
+  text-shadow:
+    0 2px 0 var(--arc-navy),
+    0 4px 0 var(--arc-navy),
+    0 6px 0 rgba(4, 30, 60, 0.6),
+    0 8px 14px rgba(0, 0, 0, 0.5);
+  transform: skewX(-8deg) rotate(-1.5deg);
+  margin: 0 0 0.1rem;
+  paint-order: stroke fill;
 }
 
 .app-tagline {
   text-align: center;
-  color: var(--color-text-dim);
+  color: #eaf6ff;
+  font-weight: 600;
   font-size: 0.9rem;
-  margin-top: -0.5rem;
+  margin-top: -0.35rem;
+  text-shadow: 0 1px 2px rgba(4, 30, 60, 0.5);
 }
 
 /* ---- Form fields --------------------------------------------------------- */
@@ -322,11 +405,12 @@ button {
   margin: 0;
 }
 .field-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-text-dim);
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #bfe4ff;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 1px rgba(4, 30, 60, 0.5);
 }
 .field-hint {
   text-transform: none;
@@ -335,76 +419,118 @@ button {
   opacity: 0.8;
 }
 .text-input {
-  min-height: var(--touch-min);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 0 0.75rem;
+  min-height: 48px;
+  background: #0e1420;
+  border: 2px solid #0a4f96;
+  border-radius: 12px;
+  padding: 0 0.85rem;
   color: var(--color-text);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45);
 }
+.text-input::placeholder { color: #7f93ad; }
 .text-input:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 3px solid var(--arc-gold-2, #f8c200);
   outline-offset: 1px;
+  border-color: var(--arc-gold-2, #f8c200);
 }
 .checkbox-field {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   min-height: var(--touch-min);
-  font-size: 0.95rem;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: #eaf6ff;
 }
 .checkbox-field input {
-  width: 1.15rem;
-  height: 1.15rem;
-  accent-color: var(--color-accent);
+  width: 1.3rem;
+  height: 1.3rem;
+  accent-color: var(--arc-gold-2, #f8c200);
 }
 .create-form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 0.85rem;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: rgba(10, 79, 150, 0.18);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* ---- Buttons ------------------------------------------------------------- */
+/* ---- Buttons (chunky glossy arcade pills) -------------------------------- */
 .btn {
   min-height: var(--touch-min);
-  padding: 0 1rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+  padding: 0 1.2rem;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  font-family: "Lilita One", system-ui, sans-serif;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+  transition: transform 0.06s ease, filter 0.1s ease;
 }
+.btn:hover { filter: brightness(1.05); }
+
+/* Primary = oversized glossy GOLD button (the reference's hero button). */
 .btn--primary {
-  background: var(--color-accent);
-  color: #0b1220;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+  min-height: 52px;
+  color: #5a3600;
+  border-color: #ffffff;
+  background:
+    radial-gradient(120% 90% at 50% 12%, rgba(255, 255, 255, 0.75), transparent 55%),
+    linear-gradient(180deg, #ffe27a 0%, #f8c200 48%, #e8a000 100%);
+  box-shadow:
+    0 5px 0 #a86400,
+    0 9px 16px rgba(0, 0, 0, 0.35),
+    inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
 }
-.btn--primary:active { transform: translateY(1px); }
+.btn--primary:active { transform: translateY(4px); box-shadow: 0 1px 0 #a86400, inset 0 2px 0 rgba(255, 255, 255, 0.7); }
+
+/* Secondary = glossy sky-blue pill. */
 .btn--secondary {
-  background: transparent;
-  color: var(--color-text);
-  border-color: var(--color-border);
+  color: #eaf6ff;
+  border-color: #ffffff;
+  background:
+    radial-gradient(120% 90% at 50% 12%, rgba(255, 255, 255, 0.45), transparent 55%),
+    linear-gradient(180deg, #4fc3f7 0%, #2a95e0 50%, #1c74c4 100%);
+  box-shadow:
+    0 5px 0 #0a4f96,
+    0 9px 16px rgba(0, 0, 0, 0.3),
+    inset 0 2px 0 rgba(255, 255, 255, 0.5);
+  text-shadow: 0 1px 2px rgba(4, 30, 60, 0.6);
 }
+.btn--secondary:active { transform: translateY(4px); box-shadow: 0 1px 0 #0a4f96, inset 0 2px 0 rgba(255, 255, 255, 0.5); }
+
 .btn--ghost {
   background: transparent;
-  color: var(--color-text-dim);
+  color: #eaf6ff;
   border-color: transparent;
+  box-shadow: none;
+  text-shadow: 0 1px 2px rgba(4, 30, 60, 0.6);
 }
+.btn--ghost:active { transform: translateY(1px); }
+
 .btn--danger {
-  background: #e23b3b;
   color: #fff;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+  border-color: #ffffff;
+  background:
+    radial-gradient(120% 90% at 50% 12%, rgba(255, 255, 255, 0.45), transparent 55%),
+    linear-gradient(180deg, #ff6b6b 0%, #e23b3b 55%, #c22 100%);
+  box-shadow:
+    0 5px 0 #7d1414,
+    0 9px 16px rgba(0, 0, 0, 0.3),
+    inset 0 2px 0 rgba(255, 255, 255, 0.4);
 }
-.btn--danger:active { transform: translateY(1px); }
-.btn--back { padding-left: 0.25rem; }
+.btn--danger:active { transform: translateY(4px); box-shadow: 0 1px 0 #7d1414, inset 0 2px 0 rgba(255, 255, 255, 0.4); }
+.btn--back { padding-left: 0.6rem; box-shadow: none; }
 .btn:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 3px solid #fff;
   outline-offset: 2px;
 }
 
@@ -415,9 +541,9 @@ button {
   gap: 0.6rem;
 }
 .theme-preview {
-  height: 68px;
-  border-radius: var(--radius-md);
-  border: 3px solid var(--tp-edge, #a86e00);
+  height: 72px;
+  border-radius: 16px;
+  border: 4px solid var(--tp-edge, #a86e00);
   background: var(--tp-board, radial-gradient(120% 140% at 50% 0%, #ffe066, #f2c400 45%, #d99e00));
   display: flex;
   align-items: center;
@@ -440,10 +566,12 @@ button {
   gap: 0.5rem;
 }
 .theme-row-label {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #bfe4ff;
   width: 3.5rem;
   flex: 0 0 auto;
+  text-shadow: 0 1px 1px rgba(4, 30, 60, 0.5);
 }
 .swatch-row {
   display: flex;
@@ -451,17 +579,18 @@ button {
   flex-wrap: wrap;
 }
 .swatch {
-  width: var(--touch-min);
-  height: var(--touch-min);
-  border-radius: var(--radius-sm);
-  border: 2px solid var(--color-border);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 3px solid rgba(255, 255, 255, 0.5);
   padding: 0;
   overflow: hidden;
   position: relative;
+  box-shadow: 0 3px 0 rgba(4, 30, 60, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.35);
 }
 .swatch[aria-checked="true"] {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent);
+  border-color: var(--arc-gold-2, #f8c200);
+  box-shadow: 0 0 0 3px var(--arc-gold-2, #f8c200), 0 3px 0 rgba(4, 30, 60, 0.35);
 }
 .swatch-label {
   position: absolute;
@@ -475,7 +604,12 @@ button {
   padding: 1px 0;
 }
 
-/* ---- Lobby --------------------------------------------------------------- */
+/* ---- Lobby (matching arcade skin) ---------------------------------------- */
+#screen-lobby {
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255, 255, 255, 0.22), transparent 60%),
+    linear-gradient(180deg, var(--arc-sky-1) 0%, var(--arc-sky-2) 45%, var(--arc-sky-3) 100%);
+}
 .lobby-wrap {
   max-width: 640px;
   margin: 0 auto;
@@ -488,23 +622,30 @@ button {
 }
 .screen-title {
   font-family: "Lilita One", system-ui, sans-serif;
-  font-size: 1.5rem;
-  color: var(--color-text);
+  font-size: 1.9rem;
+  color: var(--arc-gold-2, #f8c200);
+  transform: skewX(-6deg);
+  -webkit-text-stroke: 1.5px var(--arc-navy, #0a2e5c);
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 var(--arc-navy, #0a2e5c), 0 4px 8px rgba(0, 0, 0, 0.4);
 }
 .lobby-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.55rem;
 }
 .lobby-row {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.5rem 0.75rem;
-  background: var(--color-bg-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 0.65rem 0.8rem;
+  background:
+    radial-gradient(90% 70% at 50% 0%, rgba(255, 255, 255, 0.08), transparent 60%),
+    linear-gradient(180deg, #222a3a 0%, #1a2130 100%);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+  box-shadow: 0 3px 0 rgba(4, 30, 60, 0.35);
 }
 .lobby-row-main {
   display: flex;
@@ -513,7 +654,9 @@ button {
   min-width: 0;
 }
 .lobby-host {
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #fff;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -545,6 +688,13 @@ button {
   display: flex;
   gap: 0.4rem;
 }
+/* Compact the row action buttons so a lobby row stays tidy (still ≥44px tap). */
+.lobby-actions .btn {
+  min-height: 44px;
+  font-size: 0.95rem;
+  padding: 0 1rem;
+}
+.lobby-actions .btn--primary { min-height: 44px; }
 .lobby-empty {
   text-align: center;
   color: var(--color-text-dim);
@@ -572,6 +722,27 @@ button {
   font-size: 0.8rem;
   opacity: 0.8;
 }
+
+/* Retry panel shown when a join times out (see ui.js showWaitingRetry). */
+.wait-retry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  width: 100%;
+  align-items: center;
+}
+.wait-retry[hidden] { display: none; }
+.wait-retry-msg {
+  color: var(--color-text);
+  font-size: 0.95rem;
+  text-align: center;
+}
+.wait-retry-actions {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+}
+.wait-retry-actions .btn { flex: 1; }
 .spinner {
   width: 1rem;
   height: 1rem;

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task 3 — wait-screen retry harness</title>
+  <link rel="stylesheet" href="../css/base.css">
+</head>
+<body>
+  <!-- Minimal wait-screen shell matching index.html's #screen-wait. -->
+  <section id="screen-wait" class="screen screen--centered" data-screen="wait">
+    <div class="wait-card panel">
+      <h2 id="wait-heading" class="screen-title">Joining game…</h2>
+      <p class="wait-dots" aria-hidden="true"><span></span><span></span><span></span></p>
+      <p class="wait-status"><span id="wait-status-text">Connecting to host…</span></p>
+      <p id="wait-elapsed" class="wait-elapsed" hidden></p>
+      <button id="wait-cancel" type="button" class="btn btn--secondary">Cancel</button>
+    </div>
+  </section>
+  <pre id="results"></pre>
+
+  <script type="module">
+    import { renderWaiting, updateWaitingStatus, showWaitingRetry } from '../js/ui.js';
+    const out = document.getElementById('results');
+    const results = [];
+    const rec = (n, ok, d) => { results.push(`${ok?'PASS':'FAIL'} ${n}${d?' — '+d:''}`); out.textContent = results.join('\n'); };
+
+    // 1) Normal waiting UI shows dots + status, hides retry.
+    renderWaiting({ role: 'player', statusText: 'Connecting to host…' });
+    updateWaitingStatus('Connected — waiting for the board…');
+    const dotsVisible = !document.querySelector('.wait-dots').hidden;
+    const retryAbsent = !document.getElementById('wait-retry');
+    rec('normal waiting shows dots, no retry panel', dotsVisible && retryAbsent);
+
+    // 2) Timeout -> retry panel appears with Try again / Back; dots hidden.
+    let retried = false, backed = false;
+    showWaitingRetry({
+      message: "Couldn't reach the host.",
+      onRetry: () => { retried = true; },
+      onBack: () => { backed = true; },
+    });
+    const retryPanel = document.getElementById('wait-retry');
+    const dotsHidden = document.querySelector('.wait-dots').hidden;
+    const cancelHidden = document.getElementById('wait-cancel').hidden;
+    const btns = retryPanel ? retryPanel.querySelectorAll('.btn') : [];
+    rec('retry panel appears, spinner+cancel hidden, 2 buttons',
+      !!retryPanel && dotsHidden && cancelHidden && btns.length === 2,
+      `panel=${!!retryPanel} dotsHidden=${dotsHidden} cancelHidden=${cancelHidden} btns=${btns.length}`);
+
+    // 3) Buttons fire callbacks.
+    retryPanel.querySelector('[data-act="retry"]').click();
+    retryPanel.querySelector('[data-act="back"]').click();
+    rec('Try again + Back invoke callbacks', retried && backed, `retry=${retried} back=${backed}`);
+
+    // 4) Re-entering renderWaiting restores normal UI (retry hidden again).
+    renderWaiting({ role: 'player', statusText: 'Connecting to host…' });
+    const restored = document.getElementById('wait-retry')?.hidden === true
+      && !document.querySelector('.wait-dots').hidden
+      && !document.getElementById('wait-cancel').hidden;
+    rec('renderWaiting restores normal UI after a retry', restored);
+
+    // ≥44px touch targets on retry buttons.
+    showWaitingRetry({ message: 'x', onRetry(){}, onBack(){} });
+    const h = [...document.querySelectorAll('#wait-retry .btn')].map(b => b.getBoundingClientRect().height);
+    rec('retry buttons ≥44px tall', h.every(v => v >= 44), `heights=${h.map(x=>Math.round(x))}`);
+
+    window.__WAIT_RESULTS__ = { failures: results.filter(r=>r.startsWith('FAIL')).length, results };
+    out.dataset.done = '1';
+  </script>
+</body>
+</html>
