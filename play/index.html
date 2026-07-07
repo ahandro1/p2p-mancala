@@ -100,6 +100,10 @@
         <div class="hud-center">
           <span class="turn-indicator" id="turn-indicator">Your turn</span>
           <span class="spectate-badge" id="spectate-badge" hidden>SPECTATING</span>
+          <button id="resign-btn" type="button" class="resign-btn" hidden
+                  aria-label="Resign the game">
+            <span aria-hidden="true">🏳️</span> Resign
+          </button>
         </div>
         <div class="hud-player hud-player--2" data-player="1">
           <span class="hud-name" id="hud-name-1">Player 2</span>
@@ -126,6 +130,22 @@
                    maxlength="280" autocomplete="off" placeholder="Say something…" />
             <button type="submit" class="btn btn--primary chat-send">Send</button>
           </form>
+        </div>
+      </div>
+
+      <!-- Resign confirmation overlay: blocks board input while open. Shown by
+           ui.js showResignConfirm(); the opponent name is filled in at open. -->
+      <div id="resign-overlay" class="resign-overlay" hidden role="dialog"
+           aria-modal="true" aria-labelledby="resign-overlay-title">
+        <div class="resign-dialog panel">
+          <h2 id="resign-overlay-title" class="resign-dialog-title">Resign?</h2>
+          <p id="resign-overlay-text" class="resign-dialog-text">
+            Concede this game to your opponent?
+          </p>
+          <div class="resign-dialog-actions">
+            <button id="resign-cancel" type="button" class="btn btn--secondary">Keep playing</button>
+            <button id="resign-confirm" type="button" class="btn btn--danger">Resign</button>
+          </div>
         </div>
       </div>
     </section>

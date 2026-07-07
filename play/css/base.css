@@ -396,6 +396,12 @@ button {
   color: var(--color-text-dim);
   border-color: transparent;
 }
+.btn--danger {
+  background: #e23b3b;
+  color: #fff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+}
+.btn--danger:active { transform: translateY(1px); }
 .btn--back { padding-left: 0.25rem; }
 .btn:focus-visible {
   outline: 2px solid var(--color-accent);
@@ -625,6 +631,11 @@ button {
   font-size: 1.5rem;
   font-weight: 800;
   font-family: var(--font-mono);
+}
+.over-resign-note {
+  color: var(--color-text-dim);
+  font-size: 0.95rem;
+  font-style: italic;
 }
 .over-actions {
   display: flex;

@@ -49,10 +49,17 @@ const STORAGE_NAME = 'mancala.name';
 const STONE_HUE_VARS = ['--stone-c1', '--stone-c2', '--stone-c3', '--stone-c4', '--stone-c5'];
 
 /** Animation timing (ms). Overridable via animateEvents(events,{speed}). */
-const HOP_MS = 200;         // one sow hop
+const HOP_MS = 280;         // one sow hop (pile pit -> pit), per UX spec
+const DROP_MS = 220;        // a stone settling into a pit
 const CAPTURE_MS = 420;     // capture sweep flash
 const SWEEP_MS = 500;       // end-game gather
 const EXTRA_MS = 1100;      // extra-turn splash
+
+/** @returns {boolean} true when the user prefers reduced motion. */
+function prefersReducedMotion() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch { return false; }
+}
 
 /* ==========================================================================
    Module state
@@ -76,6 +83,21 @@ let animating = false;
 
 /** Set by animateEvents; calling it fast-forwards to the final state. */
 let skipToEnd = null;
+
+/**
+ * The travelling sow pile element (a small stone cluster), while a sow is in
+ * flight. Null when idle.
+ * @type {HTMLElement|null}
+ */
+let sowPile = null;
+
+/**
+ * Pit/store center coordinates in the board's UNSCALED internal layout space
+ * (offsetLeft/offsetTop-based, so immune to the board's transform: scale()).
+ * Measured once per animation by measurePitCenters().
+ * @type {Array<{x:number, y:number}>}
+ */
+let pitCenters = new Array(14).fill(null);
 
 /* ==========================================================================
    Small utilities
@@ -126,14 +148,33 @@ function stoneOffset(pitIndex, stoneIndex) {
   return { sx: Math.cos(ang) * r * 1.9, sy: Math.sin(ang) * r * 0.85 };
 }
 
-/** @returns {Promise<void>} resolves after `ms`, but early if skip fires. */
+/**
+ * Registry of pending wait() resolvers so a skip can flush them immediately,
+ * unblocking the animation loop (it then checks `animating` and returns).
+ * @type {Set<() => void>}
+ */
+const pendingWaits = new Set();
+
+/** Resolve every in-flight wait() at once (used by skipToEnd). */
+function flushWaits() {
+  for (const r of Array.from(pendingWaits)) r();
+  pendingWaits.clear();
+}
+
+/** @returns {Promise<void>} resolves after `ms`, or immediately on skip. */
 function wait(ms) {
   return new Promise((resolve) => {
     if (!animating) return resolve();
-    const t = setTimeout(resolve, ms);
-    // If skipToEnd fires, the sequence resolves its own way; this timer is
-    // harmless because the loop checks `animating` between steps.
-    void t;
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      pendingWaits.delete(done);
+      resolve();
+    };
+    const t = setTimeout(done, ms);
+    pendingWaits.add(done);
   });
 }
 
@@ -199,6 +240,7 @@ export function renderBoard(state) {
     }
   }
   renderHudTurn(state.currentPlayer);
+  fitBoardToStage();
 }
 
 /** Build the 12 pits + 2 stores once. */
@@ -301,6 +343,85 @@ function renderHudTurn(currentPlayer) {
 }
 
 /* ==========================================================================
+   Board scaling (Tasks 2 & 3)
+
+   The board has FIXED internal design dimensions (see board.css) and is
+   scaled as a single unit via transform: scale(). This keeps every pit's
+   relative position + size (and circularity) identical at any viewport —
+   no internal reflow. We measure the stage once per fit and set two things:
+     - #board[data-orientation]  -> 'horizontal' | 'vertical' (layout choice)
+     - #board style --board-scale -> uniform scale factor to fit the stage
+   Orientation is chosen from the stage's own aspect ratio (not a CSS
+   orientation media query), so a NARROW-BUT-LANDSCAPE desktop window or a
+   Webflow iframe correctly gets the vertical board.
+   ========================================================================== */
+
+/** Design pixel dimensions of each layout (must match board.css). */
+const BOARD_DESIGN = {
+  horizontal: { w: 900, h: 500 },
+  vertical: { w: 460, h: 820 },
+};
+
+/** True once the resize listener is installed (install exactly once). */
+let boardResizeWired = false;
+
+/**
+ * Decides which layout the board should use for the current stage size.
+ * Vertical when the available stage area is portrait-ish OR narrow (phone /
+ * narrow embed); horizontal otherwise.
+ * @param {number} stageW
+ * @param {number} stageH
+ * @returns {'horizontal'|'vertical'}
+ */
+function pickOrientation(stageW, stageH) {
+  if (stageH > stageW) return 'vertical';        // taller than wide -> vertical
+  if (stageW <= 700) return 'vertical';          // narrow embed / phone landscape
+  return 'horizontal';
+}
+
+/**
+ * Measures the board's stage and uniformly scales the fixed-geometry board to
+ * fit it, choosing horizontal/vertical layout from the stage aspect ratio.
+ * Safe to call anytime; no-ops if the board/stage aren't in the DOM yet.
+ * @returns {void}
+ */
+export function fitBoardToStage() {
+  const board = dom.board || $('board');
+  if (!board) return;
+  const stage = board.parentElement;
+  if (!stage) return;
+
+  const stageW = stage.clientWidth;
+  const stageH = stage.clientHeight;
+  if (stageW <= 0 || stageH <= 0) return;
+
+  const orientation = pickOrientation(stageW, stageH);
+  board.dataset.orientation = orientation;
+
+  // Read the design dims for the chosen layout. Because the layout switch is
+  // a class/attr toggle that CSS applies synchronously, the fixed w/h are the
+  // authoritative design size — we don't need to re-measure the board itself.
+  const design = BOARD_DESIGN[orientation];
+  // Leave a little breathing room so the board never kisses the stage edges.
+  const margin = 0.96;
+  const scale = Math.min(
+    (stageW * margin) / design.w,
+    (stageH * margin) / design.h,
+  );
+  // Clamp to something sane; never upscale beyond the design size (crisp) and
+  // never collapse to zero on a transient 0-height measure.
+  const clamped = Math.max(0.05, Math.min(scale, 1));
+  board.style.setProperty('--board-scale', String(clamped));
+
+  if (!boardResizeWired) {
+    boardResizeWired = true;
+    const refit = () => fitBoardToStage();
+    window.addEventListener('resize', refit);
+    window.addEventListener('orientationchange', refit);
+  }
+}
+
+/* ==========================================================================
    Animation
    ========================================================================== */
 
@@ -319,6 +440,8 @@ function renderHudTurn(currentPlayer) {
 export function animateEvents(events, opts = {}) {
   const { onDone, speed = 1 } = opts;
   const hop = HOP_MS * speed;
+  // Keep the CSS pile transition in sync with the JS hop duration.
+  if (dom.board) dom.board.style.setProperty('--hop-ms', `${hop}ms`);
 
   // Compute the final pit counts by replaying the (data-only) events onto a
   // copy of the current counts, so a skip can snap straight to the end.
@@ -339,6 +462,8 @@ export function animateEvents(events, opts = {}) {
       done = true;
       animating = false;
       skipToEnd = null;
+      flushWaits();
+      removeSowPile();
       // Snap to authoritative final counts.
       for (let p = 0; p < 14; p++) {
         if (p === 6 || p === 13) renderStore(p, finalCounts[p]);
@@ -349,6 +474,13 @@ export function animateEvents(events, opts = {}) {
     };
 
     skipToEnd = finish;
+
+    // Respect reduced-motion: skip straight to the authoritative result.
+    if (prefersReducedMotion()) {
+      finish();
+      return;
+    }
+
     runSequence(events, hop, finish).catch(() => finish());
   });
 }
@@ -387,60 +519,98 @@ function applyEventsToCounts(counts, events) {
 }
 
 /**
- * Step through events with real DOM updates + delays. Bails immediately if a
- * skip was requested (animating flips false).
+ * Step through events with the travelling-pile animation, then finish().
+ *
+ * The centerpiece: on `pickup` we lift the source pit's stones into a moving
+ * PILE element; each `sow` hops the pile to the next pit and drops ONE stone
+ * out of it (settle bounce + badge bump), the pile visually shrinking as it
+ * goes. Store deposits, captures, sweeps and the extra-turn splash follow.
+ *
+ * Bails immediately if a skip was requested (animating flips false); finish()
+ * then snaps the board to the authoritative counts.
+ * @param {import('./engine.js').GameEvent[]} events
+ * @param {number} hop - per-hop duration (ms)
+ * @param {() => void} finish
  */
 async function runSequence(events, hop, finish) {
   const live = currentState ? currentState.pits.slice() : new Array(14).fill(0);
+  measurePitCenters(); // one measurement pass for the whole animation
+
+  /** Number of stones currently riding in the travelling pile. */
+  let pileCount = 0;
+  /** The pit the pile is currently hovering over. */
+  let pileAt = -1;
 
   for (const e of events) {
-    if (!animating) return; // skipped
+    if (!animating) return; // skipped -> finish() snaps to final
 
     switch (e.type) {
       case 'pickup': {
         live[e.pit] = 0;
-        liftPit(e.pit);
-        setCount(e.pit, 0);
+        pileCount = e.count != null ? e.count : 0;
+        pileAt = e.pit;
         clearStones(e.pit);
-        await wait(hop * 0.6);
+        setCount(e.pit, 0);
+        liftPit(e.pit);
+        makeSowPile(e.pit, pileCount);
+        // Brief beat so the lift reads before the first hop.
+        await wait(hop * 0.55);
         break;
       }
       case 'sow': {
-        live[e.pit] += 1;
-        addStone(e.pit, live[e.pit] - 1);
-        setCount(e.pit, live[e.pit]);
+        // Hop the pile from its current pit to this one, then drop a stone.
+        movePileTo(e.pit);
         await wait(hop);
+        if (!animating) return;
+        pileAt = e.pit;
+        live[e.pit] += 1;
+        pileCount = Math.max(0, pileCount - 1);
+        shrinkSowPile(pileCount);
+        dropStoneInto(e.pit, live[e.pit] - 1);
+        bumpCount(e.pit, live[e.pit]);
+        await wait(DROP_MS * 0.6);
         break;
       }
       case 'capture': {
+        removeSowPile();
         const total = (live[e.pit] || 0) + (live[e.oppositePit] || 0);
         flashPit(e.pit);
         flashPit(e.oppositePit);
-        await wait(CAPTURE_MS * 0.5);
+        // Sweep both pits' stones toward the store.
+        sweepStonesToStore(e.pit, e.store);
+        sweepStonesToStore(e.oppositePit, e.store);
+        await wait(CAPTURE_MS * 0.6);
+        if (!animating) return;
         live[e.pit] = 0;
         live[e.oppositePit] = 0;
         live[e.store] += total;
         setCount(e.pit, 0); clearStones(e.pit);
         setCount(e.oppositePit, 0); clearStones(e.oppositePit);
-        setCount(e.store, live[e.store]);
         refillStore(e.store, live[e.store]);
-        await wait(CAPTURE_MS * 0.5);
+        bumpCount(e.store, live[e.store]);
+        await wait(CAPTURE_MS * 0.4);
         break;
       }
       case 'extraTurn': {
+        removeSowPile();
         showSplash('EXTRA TURN!');
         await wait(EXTRA_MS);
         break;
       }
       case 'sweep': {
-        for (const p of e.pits) { flashPit(p); }
-        await wait(SWEEP_MS * 0.4);
+        removeSowPile();
+        for (const p of e.pits) {
+          flashPit(p);
+          sweepStonesToStore(p, e.store);
+        }
+        await wait(SWEEP_MS * 0.5);
+        if (!animating) return;
         let total = 0;
         for (const p of e.pits) { total += live[p]; live[p] = 0; setCount(p, 0); clearStones(p); }
         live[e.store] += total;
-        setCount(e.store, live[e.store]);
         refillStore(e.store, live[e.store]);
-        await wait(SWEEP_MS * 0.6);
+        bumpCount(e.store, live[e.store]);
+        await wait(SWEEP_MS * 0.5);
         break;
       }
       case 'gameOver':
@@ -450,6 +620,7 @@ async function runSequence(events, hop, finish) {
         break;
     }
   }
+  removeSowPile();
   finish();
 }
 
@@ -496,6 +667,149 @@ function showSplash(text) {
   s.innerHTML = `<div class="splash-text">${esc(text)}</div>`;
   dom.board.appendChild(s);
   setTimeout(() => s.remove(), EXTRA_MS + 100);
+}
+
+/* ---- Travelling sow pile ------------------------------------------------- */
+
+/**
+ * Measure each pit/store CENTER in the board's own unscaled layout coordinate
+ * space, once per animation. We use offsetLeft/offsetTop (+ half size) rather
+ * than getBoundingClientRect so the values are in the board's internal
+ * (pre-transform) pixel space — the pile is a board child and therefore lives
+ * in that same space, so it scales with the board automatically and needs no
+ * per-frame rect math (60fps-friendly: measure once, transform after).
+ */
+function measurePitCenters() {
+  pitCenters = new Array(14).fill(null);
+  if (!dom.board) return;
+  for (let idx = 0; idx < 14; idx++) {
+    const el = pitEl(idx);
+    if (!el) continue;
+    pitCenters[idx] = {
+      x: el.offsetLeft + el.offsetWidth / 2,
+      y: el.offsetTop + el.offsetHeight / 2,
+    };
+  }
+}
+
+/**
+ * Create the travelling pile at the source pit, holding `count` little stones
+ * (capped for perf; the badge/logic still use the true count).
+ * @param {number} pit
+ * @param {number} count
+ */
+function makeSowPile(pit, count) {
+  removeSowPile();
+  if (!dom.board) return;
+  const center = pitCenters[pit];
+  if (!center) return;
+  const pile = document.createElement('div');
+  pile.className = 'sow-pile';
+  pile.style.setProperty('--px', `${center.x}px`);
+  pile.style.setProperty('--py', `${center.y}px`);
+  const shown = Math.min(count, 8);
+  for (let i = 0; i < shown; i++) {
+    const s = makeStone(pit, i, false);
+    // Tight scatter so the cluster reads as a small heap.
+    s.style.setProperty('--sx', `${(seededRand(pit + 3, i) - 0.5) * 60}%`);
+    s.style.setProperty('--sy', `${(seededRand(pit + 9, i) - 0.5) * 60}%`);
+    pile.appendChild(s);
+  }
+  dom.board.appendChild(pile);
+  sowPile = pile;
+}
+
+/**
+ * Ease the pile from its current position to `pit`'s center (one hop). The CSS
+ * transition on the pile animates the transform smoothly.
+ * @param {number} pit
+ */
+function movePileTo(pit) {
+  if (!sowPile) return;
+  const center = pitCenters[pit];
+  if (!center) return;
+  sowPile.style.setProperty('--px', `${center.x}px`);
+  sowPile.style.setProperty('--py', `${center.y}px`);
+}
+
+/** Trim the pile down to `count` visible stones (shrinks as stones drop). */
+function shrinkSowPile(count) {
+  if (!sowPile) return;
+  const stones = sowPile.querySelectorAll('.stone');
+  // Keep at most `count` (but never fewer than what's left of our capped set).
+  const target = Math.min(count, stones.length);
+  for (let i = stones.length - 1; i >= target; i--) stones[i].remove();
+  if (count <= 0) removeSowPile();
+}
+
+/** Remove the travelling pile if present. */
+function removeSowPile() {
+  if (sowPile) { sowPile.remove(); sowPile = null; }
+}
+
+/**
+ * Add a stone to a pit/store with the drop-settle animation. Falls back to a
+ * plain add if reduced motion is on.
+ * @param {number} idx
+ * @param {number} i - stone ordinal within the pit (for deterministic scatter)
+ */
+function dropStoneInto(idx, i) {
+  const el = pitEl(idx);
+  if (!el) return;
+  const c = el.querySelector('.pit-stones, .store-stones');
+  if (!c) return;
+  const s = makeStone(idx, i, idx === 6 || idx === 13);
+  if (!prefersReducedMotion()) {
+    s.classList.add('stone--dropping');
+    s.addEventListener('animationend', () => s.classList.remove('stone--dropping'), { once: true });
+  }
+  c.appendChild(s);
+}
+
+/**
+ * Set a pit/store count and bump its badge. The bump is the visible "tick" at
+ * the exact moment a stone lands.
+ * @param {number} idx
+ * @param {number} n
+ */
+function bumpCount(idx, n) {
+  const el = pitEl(idx);
+  if (!el) return;
+  const badge = el.querySelector('.pit-count, .store-count');
+  if (!badge) return;
+  badge.textContent = String(n);
+  if (prefersReducedMotion()) return;
+  const cls = (idx === 6 || idx === 13) ? 'store-count--bump' : 'pit-count--bump';
+  badge.classList.remove(cls);
+  // Force reflow so re-adding the class restarts the animation.
+  void badge.offsetWidth;
+  badge.classList.add(cls);
+  badge.addEventListener('animationend', () => badge.classList.remove(cls), { once: true });
+}
+
+/**
+ * Sweep a pit's currently-rendered stones toward a store during a capture or
+ * end-game sweep. Transform-only glide, then the caller repaints the store.
+ * @param {number} fromPit
+ * @param {number} store
+ */
+function sweepStonesToStore(fromPit, store) {
+  if (prefersReducedMotion()) return;
+  const fromEl = pitEl(fromPit);
+  const target = pitCenters[store];
+  const from = pitCenters[fromPit];
+  if (!fromEl || !target || !from) return;
+  const c = fromEl.querySelector('.pit-stones, .store-stones');
+  if (!c) return;
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  for (const stone of c.querySelectorAll('.stone')) {
+    stone.classList.add('stone--sweeping');
+    // Translate is relative to the stone's own scattered position; a shared
+    // pit->store delta reads as the whole handful sliding across together.
+    stone.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    stone.style.opacity = '0';
+  }
 }
 
 /* ==========================================================================
@@ -910,11 +1224,14 @@ export function updateWaitingElapsed(text) {
  * the SPECTATING badge for spectator role.
  * @param {{
  *   names:[string,string], scores?:[number,number], currentPlayer:0|1,
- *   myPlayer?:0|1|null, role?:'player'|'spectator'
+ *   myPlayer?:0|1|null, role?:'player'|'spectator',
+ *   canResign?:boolean, onResign?:()=>void
  * }} props
+ *   canResign: show the Resign button (only true for the two seated players
+ *   while the game is active). onResign: opens the resign confirmation.
  * @returns {void}
  */
-export function renderGameHud({ names = ['Player 1', 'Player 2'], scores = [0, 0], currentPlayer = 0, myPlayer = 0, role = 'player' } = {}) {
+export function renderGameHud({ names = ['Player 1', 'Player 2'], scores = [0, 0], currentPlayer = 0, myPlayer = 0, role = 'player', canResign = false, onResign } = {}) {
   if (!dom.hud) dom.hud = $('game-hud');
   $('hud-name-0') && ($('hud-name-0').textContent = names[0]);
   $('hud-name-1') && ($('hud-name-1').textContent = names[1]);
@@ -936,17 +1253,58 @@ export function renderGameHud({ names = ['Player 1', 'Player 2'], scores = [0, 0
       ind.textContent = `${names[currentPlayer]}'s turn`;
     }
   }
+
+  // Resign button: visible only to seated players while active. Spectators
+  // never see it. Wiring is (re)bound each render so onResign stays fresh.
+  const resignBtn = $('resign-btn');
+  if (resignBtn) {
+    resignBtn.hidden = !canResign || spectating;
+    resignBtn.onclick = () => { if (typeof onResign === 'function') onResign(); };
+  }
+}
+
+/**
+ * Opens the resign confirmation overlay for the given opponent name. The
+ * overlay blocks board input while open (it sits above the board via z-index
+ * and covers the viewport). Wires its two buttons to the supplied callbacks.
+ * @param {{opponentName?:string, onConfirm?:()=>void, onCancel?:()=>void}} opts
+ * @returns {void}
+ */
+export function showResignConfirm({ opponentName = 'your opponent', onConfirm, onCancel } = {}) {
+  const overlay = $('resign-overlay');
+  if (!overlay) return;
+  const text = $('resign-overlay-text');
+  if (text) text.textContent = `Concede this game to ${opponentName}?`;
+  overlay.hidden = false;
+
+  const cancel = $('resign-cancel');
+  const confirm = $('resign-confirm');
+  const close = () => { overlay.hidden = true; };
+  if (cancel) cancel.onclick = () => { close(); if (typeof onCancel === 'function') onCancel(); };
+  if (confirm) confirm.onclick = () => { close(); if (typeof onConfirm === 'function') onConfirm(); };
+}
+
+/** Force-close the resign confirmation overlay (e.g. game ended remotely). */
+export function hideResignConfirm() {
+  const overlay = $('resign-overlay');
+  if (overlay) overlay.hidden = true;
 }
 
 /**
  * Renders the game-over screen: win/lose/tie banner + score, Rematch + Leave.
+ * When `resignedBy` is set, an extra line notes who resigned (shown to every
+ * role including spectators).
  * @param {{
  *   winner:0|1|null, myPlayer?:0|1|null, score:[number,number],
- *   names?:[string,string], onRematch?:()=>void, onLeave?:()=>void
+ *   names?:[string,string], resignedBy?:string|null,
+ *   onRematch?:()=>void, onLeave?:()=>void
  * }} props
  * @returns {void}
  */
-export function renderGameOver({ winner, myPlayer = null, score = [0, 0], names = ['Player 1', 'Player 2'], onRematch, onLeave } = {}) {
+export function renderGameOver({ winner, myPlayer = null, score = [0, 0], names = ['Player 1', 'Player 2'], resignedBy = null, onRematch, onLeave } = {}) {
+  // The confirm overlay must never linger over the game-over screen.
+  hideResignConfirm();
+
   const banner = $('over-banner');
   const scoreEl = $('over-score');
   if (banner) {
@@ -965,6 +1323,23 @@ export function renderGameOver({ winner, myPlayer = null, score = [0, 0], names 
       banner.classList.add('over-banner--win');
     }
   }
+
+  // Resignation note (added/removed each render so a later normal game-over
+  // doesn't keep showing it).
+  const card = banner && banner.closest('.over-card');
+  let note = $('over-resign-note');
+  if (resignedBy) {
+    if (!note && card && scoreEl) {
+      note = document.createElement('div');
+      note.id = 'over-resign-note';
+      note.className = 'over-resign-note';
+      scoreEl.insertAdjacentElement('afterend', note);
+    }
+    if (note) note.textContent = `${resignedBy} resigned`;
+  } else if (note) {
+    note.remove();
+  }
+
   if (scoreEl) scoreEl.textContent = `${score[0]} – ${score[1]}`;
   const rematch = $('over-rematch');
   const leave = $('over-leave');
@@ -1026,6 +1401,12 @@ function runUiDevPreview() {
   renderGameHud({
     names: ['Ada', 'Grace'], scores: [demo.pits[6], demo.pits[13]],
     currentPlayer: 0, myPlayer: 0, role: 'player',
+    canResign: true,
+    onResign: () => showResignConfirm({
+      opponentName: 'Grace',
+      onConfirm: () => console.log('[uidev] resign confirmed'),
+      onCancel: () => console.log('[uidev] resign cancelled'),
+    }),
   });
 
   // Fake chat.

@@ -34,6 +34,8 @@ import {
   updateWaitingElapsed,
   renderGameHud,
   renderGameOver,
+  showResignConfirm,
+  hideResignConfirm,
 } from './ui.js';
 
 /**
@@ -512,7 +514,11 @@ function handleIncomingState(data) {
     updateHud(state);
     updateInteractivity(state);
     if (data.gameOver) {
-      showGameOver(state);
+      // A resignation carries an explicit winner + who conceded; pass those
+      // through so the over-screen shows "[name] resigned" for every role.
+      showGameOver(state, data.resigned
+        ? { resignedBy: data.resignedBy, winner: data.winner }
+        : null);
     }
   };
 
@@ -537,12 +543,35 @@ function enterGameScreen() {
 }
 
 function updateHud(state) {
+  // Only the two seated players may resign, and only while the game is still
+  // active (not already over). Spectators never get the button.
+  const isPlayer = app.role === 'host' || app.role === 'player';
+  const canResign = isPlayer && !app.gameOverShown;
   renderGameHud({
     names: hudNamesFor(),
     scores: [state.pits[6], state.pits[13]],
     currentPlayer: state.currentPlayer,
     myPlayer: app.myPlayer,
     role: app.role === 'host' ? 'player' : app.role,
+    canResign,
+    onResign: handleResignClick,
+  });
+}
+
+/**
+ * Opens the resign confirmation. On confirm, sends the resign through the
+ * session (guest -> host 'resign'; host ends the game directly). The
+ * authoritative game-over 'state' then drives every client's over-screen.
+ */
+function handleResignClick() {
+  if (!app.session) return;
+  const isPlayer = app.role === 'host' || app.role === 'player';
+  if (!isPlayer || app.gameOverShown) return;
+  showResignConfirm({
+    opponentName: app.opponentName || 'your opponent',
+    onConfirm: () => {
+      if (app.session) app.session.sendResign();
+    },
   });
 }
 
@@ -609,18 +638,28 @@ function hideDisconnectToast() {
 // Game over / rematch
 // ---------------------------------------------------------------------------
 
-function showGameOver(state) {
+/**
+ * @param {any} state
+ * @param {{resignedBy?:string, winner?:0|1}|null} [resign] - resignation info
+ *   when the game ended by concession; null for a normal end-of-game.
+ */
+function showGameOver(state, resign = null) {
   if (app.gameOverShown) return;
   app.gameOverShown = true;
   setInteractive([], () => {});
+  hideResignConfirm();
 
-  const gameWinner = engine.winner(state);
+  // A resignation dictates the winner explicitly; otherwise derive from score.
+  const gameWinner = resign && resign.winner != null
+    ? resign.winner
+    : engine.winner(state);
   showScreen('screen-over');
   renderGameOver({
     winner: gameWinner,
     myPlayer: app.myPlayer,
     score: [state.pits[6], state.pits[13]],
     names: hudNamesFor(),
+    resignedBy: resign ? resign.resignedBy : null,
     onRematch: handleRematchClick,
     onLeave: handleLeave,
   });

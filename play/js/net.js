@@ -688,6 +688,12 @@ export async function hashPassword(gameId, password) {
  * @property {function(string): void} sendChat - send a chat line (trimmed +
  *   sliced to CONFIG.chatMaxLen).
  * @property {function(): void} sendRematch - request/accept a rematch.
+ * @property {function(): void} sendResign - concede the game. Guest sends a
+ *   'resign' to the host and awaits the authoritative game-over 'state'; host
+ *   ends the game immediately (guest wins) and broadcasts it.
+ * @property {function((function(string, any): void)): (function(): void)} onResign
+ *   Fires (peerId, data) when a 'resign' arrives. Mainly host-relevant; the
+ *   host also turns it into a broadcast game-over 'state' internally.
  * @property {function((function(any): void)): (function(): void)} onState
  * @property {function((function({text:string,ts:number,from:string}, string): void)): (function(): void)} onChat
  * @property {function((function({name:string,role:string}, string): void)): (function(): void)} onPeerHello
@@ -752,6 +758,7 @@ export async function joinGameRoom(opts) {
   const helloCbs = [];
   const goneCbs = [];
   const rematchCbs = [];
+  const resignCbs = [];
   const peerJoinCbs = [];
   const fan = (arr) => (cb) => {
     arr.push(cb);
@@ -837,6 +844,25 @@ export async function joinGameRoom(opts) {
     dispatch(rematchCbs, meta.peerId);
   });
 
+  // A guest player concedes. HOST-AUTHORITATIVE: only the host turns a resign
+  // into an actual game-over 'state'. The host accepts a resign only from the
+  // seated player; it then builds a gameOver payload (winner = the OTHER
+  // player, current pit counts preserved) and broadcasts it so EVERY client
+  // (players + spectators) shows the same authoritative game-over screen.
+  // Guests never self-declare game over — they emit 'resign' and wait.
+  const offResign = room.on('resign', (data, meta) => {
+    // Surface the raw resign to any local listener (host uses it to end the
+    // game; guests/spectators ignore it and act on the resulting 'state').
+    dispatch(resignCbs, meta.peerId, data || {});
+    if (!isHost || !currentState) return;
+    // Only the seated player may resign to the host.
+    if (meta.peerId !== playerPeerId) return;
+    const info = peerInfo.get(meta.peerId);
+    const loserName = (info && info.name) || (data && data.name) || 'Opponent';
+    // Guest player is P2; if they resign, host (P1) wins.
+    endGameByResign(/* winner */ 0, loserName);
+  });
+
   const offBye = room.on('bye', (data, meta) => {
     handlePeerGone(meta.peerId);
   });
@@ -869,6 +895,31 @@ export async function joinGameRoom(opts) {
       lastMoveEvents: result.events,
       seq,
       gameOver: isGameOverState(currentState),
+    };
+    room.send('state', payload); // broadcast to all
+    dispatch(stateCbs, payload); // and update the host's own view
+  }
+
+  /**
+   * HOST-ONLY: end the game by resignation. Keeps the current pit counts as-is
+   * (no engine mutation), marks the winner explicitly, and tags the payload
+   * with who resigned so every client can show "[name] resigned". Broadcasts
+   * the authoritative game-over 'state' to all players + spectators.
+   * @param {0|1} winner - the player who WINS (the one who did NOT resign)
+   * @param {string} loserName - display name of the player who resigned
+   */
+  function endGameByResign(winner, loserName) {
+    if (!isHost || !currentState) return;
+    seq += 1;
+    const payload = {
+      board: currentState,
+      currentPlayer: currentState.currentPlayer,
+      lastMoveEvents: [],
+      seq,
+      gameOver: true,
+      resigned: true,
+      resignedBy: loserName,
+      winner,
     };
     room.send('state', payload); // broadcast to all
     dispatch(stateCbs, payload); // and update the host's own view
@@ -965,11 +1016,29 @@ export async function joinGameRoom(opts) {
       room.send('rematch', {});
     },
 
+    /**
+     * Concede the game. On a GUEST this sends a 'resign' to the host and waits
+     * for the host's authoritative game-over 'state'. On the HOST this ends the
+     * game immediately with the guest (P2) as the winner and broadcasts it.
+     */
+    sendResign() {
+      if (isHost) {
+        // Host resigns -> guest (P2) wins. Use the guest's known name if we
+        // have it, else a sensible default.
+        const guest = playerPeerId ? peerInfo.get(playerPeerId) : null;
+        endGameByResign(/* winner */ 1, name);
+        void guest;
+        return;
+      }
+      room.send('resign', { name });
+    },
+
     onState: fan(stateCbs),
     onChat: fan(chatCbs),
     onPeerHello: fan(helloCbs),
     onPeerGone: fan(goneCbs),
     onRematch: fan(rematchCbs),
+    onResign: fan(resignCbs),
     onPeerJoin: fan(peerJoinCbs),
 
     getState: () => currentState,
@@ -988,6 +1057,7 @@ export async function joinGameRoom(opts) {
       offMove();
       offChat();
       offRematch();
+      offResign();
       offBye();
       offPeerLeave();
       for (const t of graceTimers.values()) clearTimeout(t);
