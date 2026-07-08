@@ -33,13 +33,41 @@ const BOARD_THEMES = [
   { id: 'midnight-neon', label: 'Neon', board: 'linear-gradient(180deg, #1a2244, #10162e)', edge: '#00e5ff' },
 ];
 
-/** @type {{id:string,label:string,hue:string,outline:string,spec:string}[]} */
+/**
+ * @type {{id:string,label:string,hue:string,outline:string,spec:string,images?:string[]}[]}
+ *
+ * `images` (optional): a per-theme LIST of stone image URLs. Even though
+ * ui.js assigns these as an inline --stone-image custom property per stone
+ * element, the url() is actually resolved by the CSS spec relative to the
+ * STYLESHEET that consumes it via var() (board.css, in play/css/) — NOT
+ * relative to this JS file and NOT relative to the document. So these paths
+ * must match board.css's own asset references (e.g. frog's
+ * '../assets/stones/frog.gif' in themes.css), i.e. from play/css/ ->
+ * ../assets/... When present, each stone picks ONE entry deterministically
+ * (see pickStoneImage()) instead of using a single --stone-image. This is
+ * the JS-side half of the "image LIST" theme contract described in
+ * css/themes.css; board.css's [data-stone-theme="gems"] rule renders
+ * whichever URL ui.js assigns via an inline --stone-image.
+ */
 const STONE_THEMES = [
   { id: 'candy', label: 'Candy', hue: '#e02a2a', outline: '#1a1a2e', spec: '#ffffffcc' },
   { id: 'glass', label: 'Glass', hue: '#a7c7e7', outline: '#ffffff55', spec: '#ffffff' },
   { id: 'neon', label: 'Neon', hue: '#00ffa3', outline: '#05070f', spec: '#ffffff' },
   { id: 'frog', label: 'Frog', hue: '#4caf3a', outline: '#1c3a12', spec: '#ffffffcc' },
+  {
+    id: 'gems', label: 'Gems', hue: '#c9a8ff', outline: '#3a2a5c', spec: '#ffffffee',
+    images: [
+      '../assets/stones/gem-theme-1/ruby.png',
+      '../assets/stones/gem-theme-1/emerald.png',
+      '../assets/stones/gem-theme-1/opal.png',
+      '../assets/stones/gem-theme-1/pink-diamond.png',
+      '../assets/stones/gem-theme-1/sapphire.png',
+    ],
+  },
 ];
+
+/** @type {{[id:string]: {id:string,label:string,hue:string,outline:string,spec:string,images?:string[]}}} */
+const STONE_THEME_BY_ID = Object.fromEntries(STONE_THEMES.map((t) => [t.id, t]));
 
 const DEFAULT_THEME = { board: 'arcade', stones: 'candy' };
 const STORAGE_THEME = 'mancala.theme';
@@ -167,6 +195,26 @@ function stoneOffset(pitIndex, stoneIndex) {
   // Pits are wide ellipses: scatter more horizontally, less vertically so
   // stones stay inside the oval instead of spilling out the top/bottom.
   return { sx: Math.cos(ang) * r * 1.9, sy: Math.sin(ang) * r * 0.85 };
+}
+
+/**
+ * Deterministically picks one image from a theme's `images` list for stone
+ * `i` of `pit`, seeded the same way as stoneOffset (pit index + stone index)
+ * so the assignment is STABLE across re-renders (no reshuffling mid-game)
+ * and IDENTICAL on both peers, who each derive the board purely from the
+ * synced pit/stone counts. Uses a distinct seed offset from stoneOffset's so
+ * the scatter position and the gem choice are independent random streams —
+ * otherwise a stone's position and its image would be correlated, which can
+ * look patterned rather than randomly mixed.
+ * @param {string[]} images
+ * @param {number} pitIndex
+ * @param {number} stoneIndex
+ * @returns {string}
+ */
+function pickStoneImage(images, pitIndex, stoneIndex) {
+  const r = seededRand(pitIndex * 31 + 17, stoneIndex * 47 + 11);
+  const idx = Math.floor(r * images.length) % images.length;
+  return images[idx];
 }
 
 /**
@@ -358,6 +406,19 @@ function makeStone(pit, i, isStore) {
   s.className = 'stone';
   const hueVar = STONE_HUE_VARS[i % STONE_HUE_VARS.length];
   s.style.setProperty('--stone-hue', `var(${hueVar})`);
+
+  // Image-list themes (e.g. 'gems'): assign this stone ONE image from the
+  // theme's list via a deterministic hash of (pit, stone index) — same
+  // pattern as stoneOffset — so the mix looks randomly uneven across the
+  // board but never reshuffles on re-render and matches on both peers
+  // (both derive it from the same synced counts, not from network data).
+  const stoneTheme = (dom.board && dom.board.dataset.stoneTheme) || DEFAULT_THEME.stones;
+  const themeDef = STONE_THEME_BY_ID[stoneTheme];
+  if (themeDef && Array.isArray(themeDef.images) && themeDef.images.length) {
+    const url = pickStoneImage(themeDef.images, pit, i);
+    s.style.setProperty('--stone-image', `url('${url}')`);
+  }
+
   if (isStore) {
     // Stores are tall slots (portrait) / wide slots (landscape): spread mostly
     // along the long axis but keep within the slot so stones don't spill out.
@@ -962,11 +1023,13 @@ export function setTheme(theme) {
   if (dom.board) {
     dom.board.dataset.boardTheme = board;
     dom.board.dataset.stoneTheme = stones;
-    // Also expose --stone-image on the board so the image-skin CSS selector
-    // (.board[style*="--stone-image"]) matches for any image-based set.
-    const st = STONE_THEMES.find((t) => t.id === stones);
-    if (st && stones === 'frog') dom.board.style.setProperty('--use-image', '1');
-    else dom.board.style.removeProperty('--use-image');
+    // board.css keys the image-skin rule off [data-stone-theme="…"] directly
+    // (frog: single theme-wide --stone-image; gems: per-stone --stone-image
+    // set inline by makeStone()), so no extra board-level flag is needed here.
+    // Re-render existing stones so switching themes mid-game immediately
+    // picks up (or drops) image assignments without waiting for the next
+    // engine event. renderBoard() rebuilds pit/store stone DOM from counts.
+    if (currentState) renderBoard(currentState);
   }
   try {
     localStorage.setItem(STORAGE_THEME, JSON.stringify({ board, stones }));

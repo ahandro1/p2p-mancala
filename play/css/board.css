@@ -341,12 +341,24 @@
   will-change: transform;
 }
 
-/* Image-based stone skin (static OR animated GIF/WebP — see themes.css). */
+/* Image-based stone skin (static OR animated GIF/WebP — see themes.css).
+   [data-stone-theme="frog"]  -> single theme-wide --stone-image (themes.css).
+   [data-stone-theme="gems"]  -> per-stone --stone-image set inline by
+     ui.js's makeStone() (one of 5 gem URLs, deterministically chosen).
+   background-size: contain (NOT cover) so every source image — regardless
+   of its own aspect ratio — fits inside the identical fixed .stone box
+   without cropping or stretching, keeping all gems the same on-screen size. */
 [data-stone-theme="frog"] .stone,
-.board[style*="--stone-image"] .stone {
-  background: var(--stone-image) center / cover no-repeat;
+[data-stone-theme="gems"] .stone {
+  background: var(--stone-image) center / contain no-repeat;
   border: none;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  /* No circular box-shadow on image stones — the art is irregularly
+     shaped, so a round shadow reads wrong. drop-shadow() follows the
+     image's alpha silhouette instead. Applies to all image-list themes
+     (future animated GIF/WebP skins inherit this). */
+  border-radius: 0;
+  box-shadow: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
 }
 
 /* A flying stone during sow animation: positioned by transform, on top. */

@@ -108,6 +108,6 @@ export const CONFIG = {
    */
   themes: {
     board: ['arcade', 'walnut', 'midnight-neon'],
-    stones: ['candy', 'glass', 'neon', 'frog'],
+    stones: ['candy', 'glass', 'neon', 'frog', 'gems'],
   },
 };

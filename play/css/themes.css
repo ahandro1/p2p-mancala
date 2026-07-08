@@ -30,6 +30,24 @@
                           url('../assets/stones/frog.gif')). ***
                       Default is `none` so gradient stones are used.
 
+   Image-LIST themes (e.g. "gems"): a theme may instead supply a JS-side LIST
+   of image URLs (STONE_THEMES[id].images in js/ui.js) rather than a single
+   theme-wide --stone-image. ui.js's makeStone() picks ONE url per stone via a
+   deterministic hash of (pit index, stone index) — see pickStoneImage() /
+   seededRand() — and sets it as that stone's own inline --stone-image, so the
+   mix looks randomly uneven across the board but is stable across re-renders
+   and identical on both peers (derived only from synced pit counts, never
+   from network data). This is a minimal extension of the contract above: CSS
+   only needs one more rule scoped to the theme's [data-stone-theme="…"]
+   selector (see board.css) that renders whatever --stone-image resolves to —
+   it doesn't care whether that value came from the theme-wide CSS variable
+   (frog) or a per-stone inline override (gems). Entries in an `images` list
+   MAY also be animated GIF/WebP, same as the single --stone-image case.
+   IMPORTANT: every image in the list is rendered into the SAME fixed-size
+   stone box via `background-size: contain` (never `cover`), so differently
+   shaped/proportioned source art (a long sapphire vs. a round opal) never
+   looks bigger or smaller than its neighbors — see board.css's .stone rules.
+
    Stones cycle through 5 hues via --stone-c1..--stone-c5 so a pit's pile is
    colorful; image stones ignore these (the image is used verbatim).
    ========================================================================== */
@@ -187,4 +205,23 @@
 <circle cx="10" cy="11" r="2" fill="%23111"/><circle cx="22" cy="11" r="2" fill="%23111"/>\
 <path d="M9 20 q7 6 14 0" stroke="%231c3a12" stroke-width="2" fill="none" stroke-linecap="round"/>\
 </svg>');
+}
+
+/* ---- gems (IMAGE-LIST) ----------------------------------------------------
+   Five real gem images (ruby/emerald/opal/pink-diamond/sapphire) instead of a
+   single --stone-image: js/ui.js's STONE_THEMES['gems'].images lists their
+   URLs and makeStone() assigns one per stone deterministically (see the
+   "Image-LIST themes" note above). The variables below are a jewel-toned
+   fallback fill/outline (also used by the swatch preview + as a base layer in
+   case an image URL 404s) — --stone-image itself is set PER STONE inline by
+   ui.js, not here. */
+[data-stone-theme="gems"] {
+  --stone-outline: #3a2a5c;
+  --stone-spec: #ffffffee;
+  --stone-fill: #c9a8ff;
+  --stone-c1: #e0115f; /* ruby         */
+  --stone-c2: #50c878; /* emerald      */
+  --stone-c3: #a8c3bc; /* opal         */
+  --stone-c4: #f4c2e0; /* pink diamond */
+  --stone-c5: #0f52ba; /* sapphire     */
 }
